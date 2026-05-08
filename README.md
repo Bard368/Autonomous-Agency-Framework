@@ -7,7 +7,7 @@
 
 ![n8n](https://img.shields.io/badge/Orchestrator-n8n-FF6C37) ![Dify](https://img.shields.io/badge/AI_Engine-Dify-000000) ![PostgreSQL](https://img.shields.io/badge/Database-Neon_Postgres-336791) ![Docker](https://img.shields.io/badge/Infra-Docker_/_Traefik-2496ED)
 
-**Autonomous Agency Framework (AAF)** is an event-driven infrastructure for deploying and orchestrating autonomous LLM agents in a real-world B2B business environment.
+**Autonomous Agency Framework (AAF)** is an event-driven infrastructure for deploying and orchestrating autonomous LLM agents in B2B business environment.
 
 The project replaces classic departments (Sales, L1/L2 Support) with a network of integrated AI microservices. The system can autonomously parse lead websites, conduct native qualification, manage calendars, and resolve client technical incidents (Zero-Touch Resolution) with automatic escalation to engineers via Trello and IP telephony.
 

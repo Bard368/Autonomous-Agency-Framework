@@ -53,35 +53,34 @@ Intelligent L1/L2 support system. It works with session history, distinguishes n
 ![Support Escalation](./images/support_escalation.png)
 *Pictured: SLA & Escalation Protocol — incident categorization with instant Trello card creation and automatic engineer auto-dialing via Twilio.*
 
----
+### 4. Interactive Events (Callback Router)
 
-## 🤖 AI Agent Infrastructure (Dify)
-
-The system moves away from hard-coded scripts in favor of LLM agents. Agents are restricted by a strict "Anti-Robot Protocol" (no apologies, strict B2B ToV) and utilize external Tools.
-
-### Deployed Roles:
-* **Senior B2B SDR:** Conducts qualification using the N.S.S. methodology, extracts business pain points, and evaluates the lead's time/budget losses. Concludes the dialogue by automatically scheduling a video meeting.
-* **Technical Account Manager (TAM):** Provides support to active clients. Trained to autonomously grant infrastructure access without engineer involvement.
-
-### Custom Agent Tools (Dify Tools):
-The AI can autonomously call internal microservices via API:
-1. **Calendar Booker:** Checks managers' Google Calendars and creates Zoom meetings.
-2. **Context Enrichment (RAG SQL):** Executes a secure RAG query in PostgreSQL to retrieve sensitive instructions and passwords for a specific client.
-3. **Emergency Stop (Kill Switch):** If a client demands an emergency stop, the AI finds the failing workflow's ID in the database and forcefully terminates the process.
+![Caqllback](./images/callback.png)
+A dedicated microservice for handling asynchronous events from messengers (button clicks, replies, and commands). 
+* **Feature:** Processes the `/release` command from the engineering team's closed chat, parsing infrastructure credentials and securely saving them to the database for future TAM agent access.
 
 ---
 
-## 📈 Metrics & Business Impact
-1. **Zero-Touch Resolution:** Up to 70% of technical requests are closed autonomously (access provisioning, FAQs).
-2. **Instant SLA:** Time from logging a critical bug to calling the on-call engineer is `< 10 seconds`.
-3. **Secure Continuous Delivery:** Automated data collection during project releases by engineers (via the `/release` command), completely eliminating the loss of client logins and passwords.
+## 🗄️ Database Architecture (Neon Serverless)
+The framework relies on a relational data model with strict state management. Below is a simplified ER diagram of the core tables:
 
----
-
-## 🛠 Deployment
-
-1. Clone the repository.
-2. Configure environment variables based on `.env.example` (API keys are not stored publicly).
-3. Spin up the infrastructure:
-```bash
-docker compose up -d
+```mermaid
+erDiagram
+    leads_pipeline ||--o{ Ticket_messages : generates
+    leads_pipeline {
+        uuid id
+        string contact_id
+        string client_status "lead / onboarding / active"
+        jsonb contract_data
+        text ai_pain_point
+    }
+    support_tickets ||--o{ Ticket_messages : contains
+    support_tickets {
+        string ticket_id
+        string status
+        string category "BUG / ESCALATION / CR"
+    }
+    Client_credentials {
+        string contact_id
+        jsonb credentials
+    }

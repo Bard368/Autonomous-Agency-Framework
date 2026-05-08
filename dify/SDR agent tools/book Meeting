@@ -1,0 +1,55 @@
+openapi: 3.0.0
+info:
+  title: Enterprise Calendar Booking
+  version: 1.0.0
+  description: Инструмент для ФИЗИЧЕСКОГО создания встречи (события) в Google Calendar. Использовать ТОЛЬКО после того, как клиент явно согласился на предложенное время.
+servers:
+  - url: https://n8n.akulov.lol
+paths:
+  /webhook/book-calendar:
+    post:
+      summary: Забронировать слот в календаре
+      operationId: bookMeeting
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              # ЖЕСТКОЕ ТРЕБОВАНИЕ: ИИ не сможет отправить запрос без этих 4 полей
+              required:
+                - start_time
+                - end_time
+                - event_title
+                - system_client_identifier
+              properties:
+                start_time:
+                  type: string
+                  description: "ОБЯЗАТЕЛЬНО: Время начала (ISO 8601). Пример: 2026-04-15T10:00:00+03:00"
+                end_time:
+                  type: string
+                  description: "ОБЯЗАТЕЛЬНО: Время окончания (ISO 8601). Ровно +30 минут от начала."
+                event_title:
+                  type: string
+                  description: "ОБЯЗАТЕЛЬНО: Название события. Формат: 'Discovery Call: [Название компании или Имя]'"
+                system_client_identifier:
+                  type: string
+                  description: "ОБЯЗАТЕЛЬНО: Системный идентификатор (может быть числом TG или Email). Вставь сюда ТОЛЬКО значение твоей системной переменной {{contact_id}}. Никаких дополнительных слов, названий компаний или пояснений."
+                client_pain_points:
+                  type: string
+                  description: "Краткая выжимка: Главные проблемы, боли и запросы клиента, которые ты выявил во время общения. Эта информация пойдет живому менеджеру."
+                company_brief:
+                  type: string
+                  description: "Краткая выжимка: Информация о бизнесе клиента (ниша, масштаб, особенности процессов), которую удалось узнать из диалога."
+      responses:
+        '200':
+          description: Успешное бронирование
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  message:
+                    type: string

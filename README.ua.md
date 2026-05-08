@@ -1,3 +1,9 @@
+<div align="right">
+  <a href="README.md"><img src="https://img.shields.io/badge/English-d9d9d9?style=for-the-badge" alt="English"></a>
+  <a href="README.ru.md"><img src="https://img.shields.io/badge/Русский-d9d9d9?style=for-the-badge" alt="Русский"></a>
+  <a href="README.ua.md"><img src="https://img.shields.io/badge/Українська-1f8fff?style=for-the-badge" alt="Українська"></a>
+</div>
+
 # Autonomous Agency Framework (AAF)
 
 ![n8n](https://img.shields.io/badge/Orchestrator-n8n-FF6C37) ![Dify](https://img.shields.io/badge/AI_Engine-Dify-000000) ![PostgreSQL](https://img.shields.io/badge/Database-Neon_Postgres-336791) ![Docker](https://img.shields.io/badge/Infra-Docker_/_Traefik-2496ED)

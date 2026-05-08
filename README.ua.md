@@ -1,6 +1,5 @@
 <div align="right">
   <a href="README.md"><img src="https://img.shields.io/badge/English-d9d9d9?style=for-the-badge" alt="English"></a>
-  <a href="README.ru.md"><img src="https://img.shields.io/badge/Русский-d9d9d9?style=for-the-badge" alt="Русский"></a>
   <a href="README.ua.md"><img src="https://img.shields.io/badge/Українська-1f8fff?style=for-the-badge" alt="Українська"></a>
 </div>
 

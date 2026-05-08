@@ -1,0 +1,51 @@
+openapi: 3.0.1
+info:
+  title: Project Infrastructure Context API
+  description: Инструмент для получения информации о проекте клиента, настроенной инфраструктуре и доступах.
+  version: 1.0.0
+servers:
+  - url: https://n8n.akulov.lol
+    description: n8n Production Server
+
+# 👇 1. ОПИСЫВАЕМ СХЕМУ БЕЗОПАСНОСТИ
+components:
+  securitySchemes:
+    DifySecretAuth:
+      type: apiKey
+      in: header
+      name: X-Dify-Secret # Имя заголовка, которое полетит в n8n
+
+# 👇 2. ПРИМЕНЯЕМ ЕЁ КО ВСЕМУ ИНСТРУМЕНТУ
+security:
+  - DifySecretAuth: []
+
+paths:
+  /webhook/dify-get-context:
+    get:
+      operationId: getProjectContext
+      summary: Получить технический контекст и доступы проекта
+      description: Используй этот инструмент, если клиент задает вопросы по инфраструктуре своего проекта, просит напомнить пароли, API-ключи, ссылки или детали того, что было реализовано инженерами.
+      parameters:
+        - name: contact_id
+          in: query
+          required: true
+          description: Уникальный идентификатор клиента (обычно email или ID из текущего контекста чата).
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Успешный ответ с данными проекта
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  project_brief:
+                    type: string
+                    description: Изначальные договоренности и цели проекта.
+                  setup_summary:
+                    type: string
+                    description: Резюме того, что реально настроили инженеры (сервера, БД, интеграции).
+                  infrastructure_accesses:
+                    type: string
+                    description: Логины, пароли и ссылки на инфраструктуру.

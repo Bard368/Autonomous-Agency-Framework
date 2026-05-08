@@ -1,0 +1,259 @@
+{
+  "name": "Microservice: Dify Context Tool",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "dify-get-context",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -176,
+        16
+      ],
+      "id": "c891a15a-b54f-4ad0-9fb5-d6d7c7639f1f",
+      "name": "Webhook",
+      "webhookId": "f1378d73-221f-4754-8a65-76485a2e57e6",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "KiC8QoCYDvOy9k0h",
+          "name": "Context Tool"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n    project_brief, \n    setup_summary, \n    infrastructure_accesses,\n    contact_id\nFROM leads_pipeline \nWHERE contact_id = $1 \nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ $json.query.contact_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        48,
+        16
+      ],
+      "id": "d2836d2a-d797-477c-8e53-0aadfba887ee",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        656,
+        32
+      ],
+      "id": "1b552fc8-9f5c-4259-8bde-26932185ccdf",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "258b27c9-bb31-4eb8-b315-942fdc34d9d6",
+              "leftValue": "={{ $json.contact_id }}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        256,
+        16
+      ],
+      "id": "f30b1154-0efa-4ef9-9447-25c16e2ef553",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Execute a SQL query').item.json.contact_id }}",
+        "subject": "Доступы и Инструкции",
+        "message": "={{ $('Execute a SQL query').item.json.setup_summary }}\n{{ $('Execute a SQL query').item.json.infrastructure_accesses }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        416,
+        -80
+      ],
+      "id": "343abcfd-d066-4eb6-9b68-0bdb2d2fb27f",
+      "name": "Send a message",
+      "webhookId": "cc84b106-8267-46b3-a0a5-5fa426430830",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "TtuHbkHWWsLKDk3q",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.contact_id }}",
+        "text": "={{ $json.setup_summary }}\n\n{{ $json.infrastructure_accesses }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        464,
+        112
+      ],
+      "id": "390348ea-cafe-4db0-8a05-92f7d2e2564f",
+      "name": "Send a text message",
+      "webhookId": "5506fa12-a8b6-4fc5-86b3-51aa2a4f4b86",
+      "credentials": {
+        "telegramApi": {
+          "id": "YskME959crtIWSje",
+          "name": "Бот Клиент"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.akulov.lol",
+            "user-agent": "python-httpx/0.28.1",
+            "accept": "*/*",
+            "accept-encoding": "gzip, deflate, br, zstd",
+            "traceparent": "00-ecd1dd9a1fbad3b152782e8af0bd249a-f6465e3a3446f8f3-00",
+            "x-b3-sampled": "0",
+            "x-b3-spanid": "f6465e3a3446f8f3",
+            "x-b3-traceid": "ecd1dd9a1fbad3b152782e8af0bd249a",
+            "x-dify-secret": "Tool368",
+            "x-forwarded-for": "3.214.24.53",
+            "x-forwarded-host": "n8n.akulov.lol",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "c961e9c99a58",
+            "x-real-ip": "3.214.24.53"
+          },
+          "params": {},
+          "query": {
+            "contact_id": "8760411085"
+          },
+          "body": {},
+          "webhookUrl": "https://n8n.akulov.lol/webhook/dify-get-context",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "0b4c00f2-fac0-4a47-ad0b-359268453c1a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "761636f69334fbc63ec2ca98d666fc91250da19cdf07f79e76145e4f4546c080"
+  },
+  "id": "BBkSf8QEwB4W5Jqc",
+  "tags": []
+}

@@ -1,0 +1,162 @@
+{
+  "name": "Tool: Emergency Stop",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "kill-switch",
+        "authentication": "headerAuth",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "7be420be-d2b3-442a-badd-2f36f1e3221a",
+      "name": "Webhook",
+      "webhookId": "5e1ec8ea-f649-4fa6-bf57-ec665bb16835",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "pKpyMDuIjMmIWsZW",
+          "name": "Stop workflow"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT active_workflows FROM client_configs WHERE contact_id = $1;",
+        "options": {
+          "queryReplacement": "={{ $json.body.contact_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        208,
+        0
+      ],
+      "id": "951a88a4-b050-4a4f-b0f8-290b8aac13c1",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const workflowsStr = $input.first().json.active_workflows;\nif (!workflowsStr) return [];\n\n// Разбиваем по запятой, убираем пробелы и создаем массив элементов\nconst ids = workflowsStr.split(',').map(id => id.trim());\n\nreturn ids.map(id => {\n  return { json: { workflowId: id } };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "6cc223cc-d064-4245-9e1a-377a8ba80ef4",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://n8n.akulov.lol/api/v1/workflows/{{ $json.workflowId }}/deactivate",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        624,
+        0
+      ],
+      "id": "422fd1f6-9e9d-4333-8330-a40052f9898a",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ZLG5YjaRxybDBTf7",
+          "name": "n8n stop"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"status\": \"success\",\n  \"message\": \"Экстренная остановка выполнена. Все процессы клиента заморожены.\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        832,
+        0
+      ],
+      "id": "be420a3d-588e-4403-9df1-13d0c1e63943",
+      "name": "Respond to Webhook"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "5f96f5f6-2414-46b8-8c5e-e9463b60c094",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "761636f69334fbc63ec2ca98d666fc91250da19cdf07f79e76145e4f4546c080"
+  },
+  "id": "PrZdoTSA1unMPfpb",
+  "tags": []
+}

@@ -1,0 +1,504 @@
+{
+  "name": "Microservice: Doc Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "generate-contract",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -2208,
+        16
+      ],
+      "id": "8f3d7f63-ed8b-4a5f-bad1-578ec158fa15",
+      "name": "Webhook",
+      "webhookId": "8e79b5fd-760a-462c-bb30-39b810b8a35a"
+    },
+    {
+      "parameters": {
+        "operation": "copy",
+        "fileId": {
+          "__rl": true,
+          "value": "10rNYvC6Gcc35o7uqBUSuYkG7XgH4fV6zp81iDkQpZh0",
+          "mode": "id"
+        },
+        "name": "=Template_KP_AIAgency_{{ $('Normalize Input').first().json.document_payload.company }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1712,
+        208
+      ],
+      "id": "5bb54fb3-e23f-472c-ae88-73feeb71db51",
+      "name": "Copy file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "Ci6YrHAGQu2aeu9j",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://docs.googleapis.com/v1/documents/{{ $('Copy file').first().json.id }}:batchUpdate",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDocsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.google_docs_body }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1216,
+        176
+      ],
+      "id": "678b093e-84da-44c9-b9a9-4746ce57fadc",
+      "name": "HTTP Request",
+      "credentials": {
+        "googleDocsOAuth2Api": {
+          "id": "ZWrTSHabb5LAk6lv",
+          "name": "Google Docs account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "share",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Copy file').first().json.id }}",
+          "mode": "id"
+        },
+        "permissionsUi": {
+          "permissionsValues": {
+            "role": "reader",
+            "type": "anyone",
+            "allowFileDiscovery": true
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        -1008,
+        176
+      ],
+      "id": "40e14639-a65f-4fe4-bded-71460ef710e3",
+      "name": "Share file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "Ci6YrHAGQu2aeu9j",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $('Copy file').first().json.id }}/export?mimeType=application/pdf",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleDriveOAuth2Api",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -800,
+        176
+      ],
+      "id": "76b4c405-5315-46b7-83ec-3583dee3dfb1",
+      "name": "HTTP Request1",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "Ci6YrHAGQu2aeu9j",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE leads_pipeline\nSET client_status = 'pending_signature'\nWHERE contact_id = '{{ $('Normalize Input').item.json.contact_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        240,
+        144
+      ],
+      "id": "5fbecca2-d8d9-4383-ba68-c191ea42c56c",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Асинхронно читаем реальный физический файл с жесткого диска n8n\nconst buffer = await this.helpers.getBinaryDataBuffer(0, 'data');\n\n// 2. Превращаем его в чистую Base64-строку (как того требует API)\nconst base64Data = buffer.toString('base64');\n\n// 3. Берем имя компании для названия файла\nconst payload = $('Normalize Input').first().json.document_payload || {};\nconst companyName = payload.company || \"Client\";\n\n// 4. Отдаем чистую текстовую строку в следующий узел\nreturn {\n  json: {\n    ...$input.item.json,\n    pdf_base64: base64Data, // Кладем наш готовый файл сюда\n    company_name: companyName\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -592,
+        176
+      ],
+      "id": "1a0607c2-5b66-473c-9fdb-6dd1d3915890",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -2160,
+        224
+      ],
+      "id": "d7e2f7ee-d6d9-4cb2-bdb8-3e851a823166",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "let data = {};\n\n// Проверяем, кто именно запустил воркфлоу\nif ($('Webhook').isExecuted) {\n    // Если запустили через вебхук\n    data = $('Webhook').first().json.body || {};\n} else if ($('When Executed by Another Workflow').isExecuted) {\n    // Если запустили из Гейткипера\n    data = $('When Executed by Another Workflow').first().json || {};\n}\n\n// Отдаем унифицированные данные дальше\nreturn { json: data };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1936,
+        192
+      ],
+      "id": "b903f8ff-9e12-482a-a8cc-86ddc7e73937",
+      "name": "Normalize Input"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Берем данные из нормализатора\nconst payload = $('Normalize Input').first().json.document_payload || {};\n\n// ГЕНЕРИРУЕМ ТЕКУЩУЮ ДАТУ В ФОРМАТЕ ДД.ММ.ГГГГ\nconst today = new Date().toLocaleDateString('ru-RU');\n\n// Безопасно формируем теги для Google Docs\nconst wrap = (val) => \"{{\" + val + \"}}\";\n\n// Собираем массив замен (добавили замену для {{date}})\nconst requests = [\n  { replaceAllText: { containsText: { text: wrap(\"date\"), matchCase: true }, replaceText: today } },\n  { replaceAllText: { containsText: { text: wrap(\"fio\"), matchCase: true }, replaceText: payload.fio || \"\" } },\n  { replaceAllText: { containsText: { text: wrap(\"position\"), matchCase: true }, replaceText: payload.position || \"\" } },\n  { replaceAllText: { containsText: { text: wrap(\"company\"), matchCase: true }, replaceText: payload.company || \"\" } },\n  { replaceAllText: { containsText: { text: wrap(\"inn\"), matchCase: true }, replaceText: payload.inn || \"\" } },\n  { replaceAllText: { containsText: { text: wrap(\"project_goals\"), matchCase: true }, replaceText: payload.project_goals || \"\" } },\n  { replaceAllText: { containsText: { text: wrap(\"proposed_solution\"), matchCase: true }, replaceText: payload.proposed_solution || \"\" } },\n  { replaceAllText: { containsText: { text: wrap(\"timeline_and_budget\"), matchCase: true }, replaceText: payload.timeline_and_budget || \"\" } }\n];\n\n// Отдаем готовый объект\nreturn {\n  json: {\n    google_docs_body: { \n      requests: requests \n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1504,
+        208
+      ],
+      "id": "4be5f65f-99a3-45a4-a613-8d164d73d0ac",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.docuseal.com/submissions/pdf",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Auth-Token",
+              "value": "ffFjAv4doB96eF8KYKnGCbEcakRSC42e8r68TPcPM5c"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  {\n    \"send_email\": false,\n    \"documents\": [\n      {\n        \"name\": \"Contract_\" + ($('Normalize Input').first()?.json?.document_payload?.company || \"Client\"),\n        \"file\": $json.pdf_base64 || \"\"\n      }\n    ],\n    \"submitters\": [\n      {\n        \"role\": \"Client\",\n        \"email\": \"client@docuseal.com\",\n        \"external_id\": String($('Normalize Input').first()?.json?.contact_id || \"unknown\")\n      }\n    ]\n  }\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -384,
+        176
+      ],
+      "id": "1c900b08-9cbd-4db9-8c38-8ede68909471",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Normalize Input').item.json.contact_id }}",
+        "text": "=Договор сформирован. Пожалуйста, ознакомьтесь и подпишите его электронно по этой защищенной ссылке: https://docuseal.com/s/{{ $json.submitters[0].slug }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        16,
+        240
+      ],
+      "id": "3ccb7722-7e23-4400-b906-3a68e3f75c6f",
+      "name": "Send a text message",
+      "webhookId": "b1168dc8-111c-459a-891f-4b892cfe5a12",
+      "credentials": {
+        "telegramApi": {
+          "id": "YskME959crtIWSje",
+          "name": "Бот Клиент"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "3235905f-0dc7-4992-a89c-17af29e400aa",
+              "leftValue": "={{ $('Normalize Input').item.json.contact_id }}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -192,
+        144
+      ],
+      "id": "2d13cf4b-2412-4d6e-9f3e-8b894d0b70f9",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Normalize Input').item.json.contact_id }}",
+        "subject": "Подписание",
+        "message": "=Договор сформирован. Пожалуйста, ознакомьтесь и подпишите его электронно по этой защищенной ссылке: https://docuseal.com/s/{{ $json.submitters[0].slug }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "c9d97f25-6e09-4eda-b8de-31a4840bd597",
+      "name": "Send a message",
+      "webhookId": "d3d65193-2776-43f5-8df2-fffc4720b10d",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "TtuHbkHWWsLKDk3q",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "json": {
+          "message_to_send": "Лаврентий Палыч, данные получены. Провожу валидацию.\n\nФИО: Берия Лаврентий Палыч\nДолжность: СОО\nКомпания: СССР\nИНН: 14881488\n\nВсе 4 параметра заполнены. Данные валидированы. Система формирует договор и техническое задание. Файл появится в чате в течение 2-х минут.",
+          "document_payload": {
+            "fio": "Берия Лаврентий Палыч",
+            "position": "СОО",
+            "company": "СССР",
+            "inn": "14881488",
+            "project_goals": "Автоматизация онбординга сотрудников и первичных консультаций с клиентами",
+            "proposed_solution": "Чат-бот с RAG на базе Dify self-host",
+            "timeline_and_budget": "Не указано"
+          },
+          "is_ready_for_doc": true,
+          "conversation_id": "01bd0a52-b7a5-4a61-a81a-28d1f2969a0f",
+          "contact_id": "akulovil368@gmail.com"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Copy file": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Share file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Share file": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Normalize Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Input": {
+      "main": [
+        [
+          {
+            "node": "Copy file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "60e902ec-cb26-40c2-9614-a5a87e579425",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "761636f69334fbc63ec2ca98d666fc91250da19cdf07f79e76145e4f4546c080"
+  },
+  "id": "6MVlK0kgyr8KOdsR",
+  "tags": []
+}

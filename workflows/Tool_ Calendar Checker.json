@@ -1,0 +1,124 @@
+{
+  "name": "Tool: Calendar Checker",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "check-calendar",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "bb94222f-7da7-45e0-a1b0-b391116b0579",
+      "name": "Webhook",
+      "webhookId": "42b1d5fb-ae1a-4e57-8bfa-12959ed67178"
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n    // 1. Читаем входящие параметры от Агента (Dify пришлет их в body вебхука)\n    const payload = $input.item.json.body || {};\n    \n    // Достаем email сотрудника\n    const employeeEmail = payload.employee_email || \"andcoestate@gmail.com\";\n    \n    let timeMin, timeMax, displayDate, queryMode;\n\n    // 🚨 ВАЖНО: Фиксируем часовой пояс для Днепра/Киева (UTC+3)\n    // Мы больше не используем .toISOString(), так как он ломает часовые пояса\n    const TZ = \"+03:00\";\n\n    // СЦЕНАРИЙ А: Агент прислал диапазон дат (например, \"на следующей неделе\")\n    if (payload.start_date && payload.end_date) {\n        queryMode = \"range\";\n        \n        // Ручная сборка строки времени с нашим часовым поясом\n        timeMin = `${payload.start_date}T00:00:00${TZ}`;\n        timeMax = `${payload.end_date}T23:59:59${TZ}`;\n        \n        displayDate = `период с ${payload.start_date} по ${payload.end_date}`;\n    } \n    // СЦЕНАРИЙ Б: Агент прислал конкретную дату (например, \"во вторник\")\n    else if (payload.target_date) {\n        queryMode = \"specific_date\";\n        \n        // Формируем жесткие границы дня для Google Календаря\n        timeMin = `${payload.target_date}T00:00:00${TZ}`;\n        timeMax = `${payload.target_date}T23:59:59${TZ}`;\n        \n        // Оставляем твой красивый вывод для промпта ИИ\n        let target = new Date(payload.target_date);\n        displayDate = target.toLocaleDateString('ru-RU', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });\n    } \n    // СЦЕНАРИЙ В: Безопасный режим по умолчанию (Fall-back на \"Завтра\")\n    else {\n        queryMode = \"fallback_tomorrow\";\n        let tomorrow = new Date();\n        tomorrow.setDate(tomorrow.getDate() + 1);\n        \n        // Достаем год, месяц и день с добавлением нулей спереди (04 вместо 4)\n        let yyyy = tomorrow.getFullYear();\n        let mm = String(tomorrow.getMonth() + 1).padStart(2, '0');\n        let dd = String(tomorrow.getDate()).padStart(2, '0');\n        \n        // Формируем границы завтрашнего дня\n        timeMin = `${yyyy}-${mm}-${dd}T00:00:00${TZ}`;\n        timeMax = `${yyyy}-${mm}-${dd}T23:59:59${TZ}`;\n        \n        displayDate = tomorrow.toLocaleDateString('ru-RU', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + \" (по умолчанию)\";\n    }\n\n    // 2. Отдаем стандартизированные данные для Google Календаря\n    // Обернул в массив [{}], так как новые версии n8n требуют массив на выходе из узла Code\n    return [{\n        json: {\n            timeMin: timeMin,\n            timeMax: timeMax,\n            targetDate: displayDate,\n            employee_email: employeeEmail,\n            _execution_mode: queryMode\n        }\n    }];\n\n} catch (error) {\n    throw new Error(\"[СБОЙ ПАРСИНГА ДАТЫ] Убедитесь, что Агент передает формат YYYY-MM-DD. Детали: \" + error.message);\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        32
+      ],
+      "id": "d6f5d134-72e1-4ba8-9990-d898828cfda3",
+      "name": "Set Time Range"
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n    const items = $input.all();\n    const timeNode = $(\"Set Time Range\").first().json || {};\n    const targetDate = timeNode.targetDate || \"выбранный период\";\n\n    // Если Гугл не вернул событий вообще\n    if (!items || items.length === 0 || (items.length === 1 && !items[0].json.id)) {\n         return [{ json: { status: \"success\", calendar_data: `На ${targetDate} календарь полностью свободен. Предложи клиенту слоты с 10:00 до 18:00.` } }];\n    }\n\n    let scheduleMap = {};\n    let hasBusyEvents = false;\n\n    items.forEach(item => {\n        const event = item.json;\n        \n        // 🚨 ГЛАВНАЯ ЗАЩИТА: Пропускаем события, которые не занимают время (Free/Transparent)\n        if (event.transparency === 'transparent') return;\n        // Пропускаем отмененные события\n        if (event.status === 'cancelled') return;\n        if (!event || !event.start) return;\n\n        hasBusyEvents = true;\n\n        const isAllDay = !!event.start.date;\n        let start = new Date(isAllDay ? event.start.date : event.start.dateTime);\n        let end = new Date(isAllDay ? event.end.date : event.end.dateTime);\n\n        // 🚨 ЖЕСТКИЙ ЧАСОВОЙ ПОЯС ПРИ ВЫВОДЕ В ТЕКСТ\n        let timeOpts = { timeZone: 'Europe/Kyiv', hour: '2-digit', minute: '2-digit' };\n        let dateOpts = { timeZone: 'Europe/Kyiv', day: '2-digit', month: '2-digit', year: 'numeric' };\n\n        let dateKey = start.toLocaleDateString('ru-RU', dateOpts);\n        if (!scheduleMap[dateKey]) scheduleMap[dateKey] = [];\n\n        if (isAllDay) {\n            scheduleMap[dateKey].push(\"[ВЕСЬ ДЕНЬ ЗАНЯТ]\");\n        } else {\n            let startTime = start.toLocaleTimeString('ru-RU', timeOpts);\n            let endTime = end.toLocaleTimeString('ru-RU', timeOpts);\n            scheduleMap[dateKey].push(`${startTime} - ${endTime}`);\n        }\n    });\n\n    // Если все события были \"прозрачными\" (например, просто напоминания)\n    if (!hasBusyEvents) {\n         return [{ json: { status: \"success\", calendar_data: `На ${targetDate} реальных встреч нет (календарь свободен). Предложи клиенту слоты с 10:00 до 18:00.` } }];\n    }\n\n    let aiPrompt = `ИНСТРУКЦИЯ ПО КАЛЕНДАРЮ на ${targetDate}:\\nУЖЕ ЗАНЯТОЕ ВРЕМЯ:\\n`;\n    for (let date in scheduleMap) {\n        aiPrompt += `📅 ${date}: ${scheduleMap[date].join(', ')}\\n`;\n    }\n    aiPrompt += `\\nЗАДАЧА: Сверься с занятым временем. Если клиент уже предложил конкретное время, и оно СВОБОДНО — соглашайся. Если занято или не предложено — предложи 2 свободных слота по 30 минут (строго между 10:00 и 18:00).`;\n\n    return [{ json: { status: \"success\", calendar_data: aiPrompt } }];\n\n} catch (error) {\n    return [{ json: { status: \"error\", calendar_data: `Сбой парсера календаря: ${error.message}. Переведи диалог на менеджера.` } }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        656,
+        32
+      ],
+      "id": "3592fea2-1362-4a70-b91b-d289e96ac9d2",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "calendar": {
+          "__rl": true,
+          "value": "={{ $json.employee_email }}",
+          "mode": "id"
+        },
+        "timeMin": "={{ $json.timeMin }}",
+        "timeMax": "={{ $json.timeMax }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        432,
+        32
+      ],
+      "id": "39861d85-02ba-47bb-adfc-155a1d73ab97",
+      "name": "Get many events",
+      "alwaysOutputData": true,
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "u0Oj0lLN5kKbF7MU",
+          "name": "Google Calendar account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Set Time Range",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Time Range": {
+      "main": [
+        [
+          {
+            "node": "Get many events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many events": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "dfc410b7-dfe5-426a-8e65-be4b7175b76d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "761636f69334fbc63ec2ca98d666fc91250da19cdf07f79e76145e4f4546c080"
+  },
+  "id": "iVWyFcjd9Y47G8bk",
+  "tags": []
+}

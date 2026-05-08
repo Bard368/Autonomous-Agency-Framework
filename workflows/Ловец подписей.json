@@ -1,0 +1,180 @@
+{
+  "name": "Ловец подписей",
+  "nodes": [
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE leads_pipeline \nSET client_status = 'implementation' \nWHERE contact_id = '{{ $json.body.data.submitters[0].external_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -416,
+        96
+      ],
+      "id": "d7ad52a3-54f6-4345-81ad-898c65962579",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a45bc560-6a78-483e-a9b7-2b6882926df5",
+              "leftValue": "={{ $('Webhook').item.json.body.data.submitters[0].external_id }}",
+              "rightValue": "=@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -208,
+        96
+      ],
+      "id": "782029f9-fa54-4dfa-954d-9fe554e90de5",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Webhook').item.json.body.data.submitters[0].application_key }}",
+        "text": "=Договор успешно подписан! 🤝  Проект переведен в стадию реализации (Implementation).  Для старта развертывания инфраструктуры мне необходимы ваши доступы (API-ключи и токены). Пожалуйста, НЕ присылайте пароли в этот чат обычным текстом в целях безопасности.  Перейдите по защищенной ссылке ниже и заполните форму (шлюз автоматически привязан к вашему профилю): https://tally.so/r/pb7DY8?contact_id={{ $('Webhook').item.json.body.data.submitters[0].application_key }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        192
+      ],
+      "id": "7d5bc8ba-82ee-415f-bf25-5f23e5532929",
+      "name": "Send a text message",
+      "webhookId": "8255a5fc-1d43-44e8-80c4-406d7e131b6b",
+      "credentials": {
+        "telegramApi": {
+          "id": "YskME959crtIWSje",
+          "name": "Бот Клиент"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Webhook').item.json.body.data.submitters[0].external_id }}",
+        "subject": "Подписание ",
+        "message": "=Договор успешно подписан! 🤝  Проект переведен в стадию реализации (Implementation).  Для старта развертывания инфраструктуры мне необходимы ваши доступы (API-ключи и токены). Пожалуйста, НЕ присылайте пароли в этот чат обычным текстом в целях безопасности.  Перейдите по защищенной ссылке ниже и заполните форму (шлюз автоматически привязан к вашему профилю): https://tally.so/r/pb7DY8?contact_id={{ $('Webhook').item.json.body.data.submitters[0].application_key }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "705e0695-dccd-4296-bd23-e3c7790cf851",
+      "name": "Send a message",
+      "webhookId": "b937da35-e045-42bb-9062-1c8b2dd767a2",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "TtuHbkHWWsLKDk3q",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "docuseal-signed",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -624,
+        96
+      ],
+      "id": "7507c799-8273-40f8-a7ef-775ffe431b7e",
+      "name": "Webhook",
+      "webhookId": "86014ed5-9fe7-4aa9-a22a-87c94ce4ce97"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "7ed5eff7-3828-44f4-a602-d2404975f48b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "761636f69334fbc63ec2ca98d666fc91250da19cdf07f79e76145e4f4546c080"
+  },
+  "id": "NPuWQoRYKRNXxsL6",
+  "tags": []
+}

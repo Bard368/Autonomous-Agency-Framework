@@ -1,0 +1,2851 @@
+{
+  "name": "Worker: Support Pipeline",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "343b356e-19b3-4817-8ca5-c58a4b4d5722",
+      "typeVersion": 1.1,
+      "name": "When Executed by Another Workflow",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        -3296,
+        768
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ticket_id, status, remote_message_id, category\nFROM support_tickets \nWHERE contact_id = $1 \n  AND status IN ('open', 'pending_client', 'in_progress', 'implementation') \nORDER BY created_at DESC LIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ [ $('When Executed by Another Workflow').item.json.sender.contact_id ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -3136,
+        768
+      ],
+      "id": "5059ca37-f42e-4f50-9ef3-650d52de79c7",
+      "name": "Check Open Ticket",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dify.ai/v1/chat-messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -2224,
+        768
+      ],
+      "id": "095740a2-8395-4561-b4c8-bb3a2f39b42b",
+      "name": "HTTP Request: Dify Chat",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "62dkpWYZgXTJK9NV",
+          "name": "Dify Supp"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n    const rawAnswer = $('HTTP Request: Dify Chat').item.json.answer || \"\";\n    const baseData = $('When Executed by Another Workflow').first().json || {};\n    // Безопасное извлечение ID: проверяем текущий ответ, затем контекст оркестратора\n    const conversationId = $('HTTP Request: Dify Chat').item.json.conversation_id || (baseData.context && baseData.context.dify_conversation_id) || \"unknown\";\n\n    // 1. ADVANCED CLEANUP: Вырезаем монолог <think> (DeepSeek/O1)\n    let cleanText = rawAnswer.replace(/<think>[\\s\\S]*?<\\/think>\\n*/g, '').trim();\n\n    // 2. SMART JSON EXTRACTION: Ищем только блок {...}, игнорируя вступительный текст ИИ\n    let jsonString = cleanText;\n    const jsonMatch = cleanText.match(/\\{[\\s\\S]*\\}/);\n    if (jsonMatch) {\n        jsonString = jsonMatch[0];\n    } else {\n        // Fallback: если регулярка не сработала, чистим маркдаун\n        jsonString = cleanText.replace(/```json/g, '').replace(/```/g, '').trim();\n    }\n\n    let parsedData = {};\n    \n    try {\n        parsedData = JSON.parse(jsonString);\n    } catch (error) {\n        // ИЗОЛЯЦИЯ ПАДЕНИЙ (Graceful Degradation): \n        // Не \"Авария ИИ\", а мягкий перевод на инженера, чтобы клиент не пугался\n        return [{\n            json: {\n                ...baseData,\n                conversation_id: conversationId,\n                parse_success: false,\n                confidence_score: 0, \n                urgency: 10,\n                category: \"ESCALATION\",\n                draft_reply: \"Система зафиксировала нестандартный ответ. Подключаю ведущего инженера к диалогу.\",\n                raw_ai_answer: rawAnswer // ВАЖНО: сохраняем бред ИИ для логов и разбора полетов\n            }\n        }];\n    }\n\n    // 3. СТРОГАЯ ТИПИЗАЦИЯ И НОРМАЛИЗАЦИЯ (Type Enforcement)\n    // Гарантируем, что downstream узлы не упадут из-за NaN или undefined\n    let confidence = parseInt(parsedData.confidence_score, 10);\n    confidence = isNaN(confidence) ? 50 : Math.max(0, Math.min(100, confidence));\n\n    let urgency = parseInt(parsedData.urgency, 10);\n    urgency = isNaN(urgency) ? 5 : Math.max(1, Math.min(10, urgency)); // Зажимаем между 1 и 10\n\n    let draftReply = String(parsedData.draft_reply || parsedData.answer || \"\").trim();\n    let category = String(parsedData.category || \"INFO\").toUpperCase();\n\n    // 4. ПРЕДОХРАНИТЕЛИ (Zero-Trust Policy)\n    // Если ИИ говорит \"Уверен на 100%\", но выдал 3 слова — это галлюцинация.\n    if (confidence >= 90 && draftReply.length < 15) {\n        confidence = 30; // Искусственно занижаем, чтобы Оркестратор отдал это человеку\n    }\n\n    // 5. ВЫДАЧА ИДЕАЛЬНОГО КОНТРАКТА\n    return [{\n        json: {\n            ...baseData, \n            conversation_id: conversationId,\n            parse_success: true,\n            confidence_score: confidence,\n            urgency: urgency,\n            category: category,\n            draft_reply: draftReply\n        }\n    }];\n\n} catch (error) {\n    throw new Error(`[AI Parser Fatal Error]: Критический сбой обработки. Детали: ${error.message}`);\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1840,
+        768
+      ],
+      "id": "561f08cd-c7c6-41bf-a577-5ec52228bfc8",
+      "name": "Code: Parse AI Decision"
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n    // 1. Берем данные прямо из триггера Оркестратора\n    const triggerNode = $('When Executed by Another Workflow').first();\n    if (!triggerNode) throw new Error(\"Нет входящих данных от Оркестратора\");\n    const baseData = triggerNode.json;\n\n    // 2. Бронируем ID пользователя\n    // contactId - чистый ID (например email) для запросов к БД\n    const contactId = baseData.sender?.contact_id || \"unknown_support_user\";\n    // safeUserId - экранированный ID для системного логгера Dify\n    const safeUserId = String(contactId).replace(/[^a-zA-Z0-9_-]/g, '_');\n\n    // 3. 🌟 ИНЪЕКЦИЯ КОНТЕКСТА: Работа с текстом и невидимыми файлами\n    let rawText = baseData.payload?.raw_text || \"\";\n    \n    const hasFiles = baseData.payload?.has_attachments || (baseData.payload?.files_base64 && baseData.payload.files_base64.length > 0);\n\n    if (hasFiles) {\n        rawText = `[СИСТЕМНОЕ УВЕДОМЛЕНИЕ: Клиент прикрепил файл/скриншот. Строго следуй инструкции \"ПЕРЕХВАТ МЕДИАФАЙЛОВ\".]\\n\\nТекст клиента: ${rawText}`;\n    }\n    if (rawText.trim() === `[СИСТЕМНОЕ УВЕДОМЛЕНИЕ: Клиент прикрепил файл/скриншот. Строго следуй инструкции \"ПЕРЕХВАТ МЕДИАФАЙЛОВ\".]\\n\\nТекст клиента:`) {\n        rawText += \"Нет описания, только файл.\";\n    }\n\n    // 4. Формируем контекст клиента\n    const context = baseData.context || {};\n    \n    // 🌟 СТРОГАЯ ПРОВЕРКА СТАТУСА: Берем статус ИМЕННО из Оркестратора (leads_pipeline)\n    let clientStatus = context.client_status;\n    \n    // Если Оркестратор почему-то не передал статус, ставим 'active' по умолчанию\n    if (!clientStatus) {\n        clientStatus = \"active\";\n    }\n\n    // 5. Собираем идеальный контракт для Dify\n    let difyPayload = {\n        \"inputs\": {\n            \"client_status\": clientStatus,\n            \"project_brief\": context.project_brief || \"Бриф отсутствует\",\n            // 👇 КРИТИЧЕСКОЕ ДОБАВЛЕНИЕ: Передаем ID для Custom Tool (Агента)\n            \"contact_id\": contactId \n        },\n        \"query\": rawText,\n        \"response_mode\": \"blocking\",\n        \"user\": safeUserId\n    };\n\n    // 6. Прокидываем память (Conversation ID)\n    if (context.dify_conversation_id) {\n        difyPayload.conversation_id = context.dify_conversation_id;\n    }\n\n    return [{ json: difyPayload }];\n\n} catch (error) {\n    throw new Error(`[Dify Payload Builder Error]: ${error.message}`);\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2416,
+        768
+      ],
+      "id": "ff0aacd3-aa60-4350-8ba1-d7bc3ca799fb",
+      "name": "Code: Build Dify Payload"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO support_tickets (\n    contact_id, \n    category, \n    priority, \n    status, \n    description, \n    created_at, \n    updated_at\n) \nVALUES (\n    $1, \n    $2, \n    'medium', \n    'open', \n    $3, \n    NOW(), \n    NOW()\n) \nRETURNING ticket_id, status, priority;\n\n",
+        "options": {
+          "queryReplacement": "={{ $json.sender.contact_id }},{{ $json.category }},{{ $json.payload.raw_text || null }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1152,
+        256
+      ],
+      "id": "900d3f5d-6c8e-4be0-aaf0-4ade36d4f72a",
+      "name": "DB: Create New Ticket",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n    const kommoDomain = 'jikoyibo'; // Твой домен\n\n    // 🌟 ENTERPRISE-ПАТТЕРН: Safe Data Fetcher\n    function getSafeNodeJson(nodeName) {\n        try {\n            const item = $(nodeName).first();\n            return item ? item.json : null;\n        } catch (e) {\n            return null; \n        }\n    }\n\n    const baseData = getSafeNodeJson('When Executed by Another Workflow') || {};\n    \n    // 🌟 БЕЗОПАСНЫЙ ПОИСК КАТЕГОРИИ (С учетом 'implementation')\n    const aiDecision = getSafeNodeJson('Code: Parse AI Decision');\n    // Если ИИ не работал, берем из Оркестратора, если и там нет - ставим 'IMPLEMENTATION'\n    const category = aiDecision?.category || baseData.context?.category || 'IMPLEMENTATION';\n    \n    // 🌟 SMART TICKET LOCATOR\n    const newTicketJson = getSafeNodeJson('DB: Create New Ticket');\n    const existingTicketJson = getSafeNodeJson('Check Open Ticket');\n    \n    let ticketId = baseData.context?.active_ticket_id || \"UNKNOWN\";\n    if (newTicketJson && newTicketJson.ticket_id) {\n        ticketId = newTicketJson.ticket_id;\n    } else if (existingTicketJson && existingTicketJson.ticket_id) {\n        ticketId = existingTicketJson.ticket_id;\n    }\n\n    const crmId = baseData.context?.crm_deal_id || \"0\";\n    \n    function escapeHTML(str) {\n        if (!str) return \"<i>Текст отсутствует</i>\";\n        return String(str).replace(/&/g, \"&amp;\").replace(/</g, \"&lt;\").replace(/>/g, \"&gt;\");\n    }\n    \n    const safeClientText = escapeHTML(baseData.payload?.raw_text);\n    \n    // 🌟 DYNAMIC HEADER (Динамические заголовки по категориям)\n    const isNewTicket = !!newTicketJson;\n    let header = \"\";\n\n    if (isNewTicket) {\n        let emoji = \"🚨\";\n        let headerTitle = \"НОВЫЙ ТИКЕТ\";\n\n        switch(category.toUpperCase()) {\n            case 'ESCALATION': emoji = '🔥'; headerTitle = 'АВАРИЯ (КРИТИЧНО)'; break;\n            case 'BUG': emoji = '🐛'; headerTitle = 'БАГ-РЕПОРТ'; break;\n            case 'FEATURE_REQUEST': emoji = '💡'; headerTitle = 'ЗАПРОС НА ДОРАБОТКУ'; break;\n            case 'IMPLEMENTATION': emoji = '🏗'; headerTitle = 'ЭТАП ВНЕДРЕНИЯ'; break;\n        }\n        header = `${emoji} <b>${headerTitle} #${ticketId}</b>\\n`;\n    } else {\n        // Если тикет уже открыт, инженерам не нужно орать про аварию, это просто реплай\n        header = `💬 <b>ОТВЕТ КЛИЕНТА (Тикет #${ticketId})</b>\\n`;\n    }\n    \n    const fullEngineerMessage = `${header}` +\n                                `🏢 <b>CRM:</b> <a href=\"https://${kommoDomain}.kommo.com/leads/detail/${crmId}\">Карточка клиента</a>\\n` +\n                                `👤 <b>От кого:</b> ${baseData.sender?.name || \"Unknown\"}\\n\\n` +\n                                `📝 <b>ТЕКСТ:</b>\\n${safeClientText}`;\n\n    const base64Files = baseData.payload?.files_base64 || [];\n    const results = [];\n    \n    // 1. Сначала отдаем все картинки (БЕЗ ТЕКСТА)\n    if (Array.isArray(base64Files) && base64Files.length > 0) {\n        for (let i = 0; i < base64Files.length; i++) {\n            const fileObj = base64Files[i];\n            if (!fileObj || !fileObj.base64) continue;\n            try {\n                const buffer = Buffer.from(fileObj.base64, 'base64');\n                const binaryData = await this.helpers.prepareBinaryData(buffer, fileObj.file_name || `photo_${i}.jpg`, fileObj.mime_type || 'image/jpeg');\n                results.push({\n                    json: { \n                        type: \"photo\",\n                        category: category,         // <-- ТЕПЕРЬ СВИТЧ УВИДИТ КАТЕГОРИЮ ФОТОГРАФИИ\n                        is_new_ticket: isNewTicket, // <-- ТЕПЕРЬ СВИТЧ УВИДИТ, НОВЫЙ ЛИ ЭТО ТИКЕТ\n                        ticket_id: ticketId         // <-- ПРОБРАСЫВАЕМ ID НА ВСЯКИЙ СЛУЧАЙ\n                    },\n                    binary: { data: binaryData }\n                });\n            } catch (e) {}\n        }\n    }\n\n    // 2. Последним элементом отдаем ТЕКСТ С КНОПКАМИ (БЕЗ КАРТИНКИ)\n    // (Этот блок остался без изменений, как ты и просил)\n    results.push({\n        json: {\n            type: \"text\",\n            ticket_id: ticketId,\n            category: category, // <-- ПРОБРОСИЛИ КАТЕГОРИЮ ДЛЯ СВИТЧА\n            engineer_message: fullEngineerMessage,\n            is_new_ticket: isNewTicket \n        }\n    });\n\n    return results;\n\n} catch (error) {\n    throw new Error(`[Omni-Builder Error]: ${error.message}`);\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -224,
+        192
+      ],
+      "id": "f8a0ad55-f3c9-4d5f-94b3-1788c3596c62",
+      "name": "Code: Prepare L2 Escalation"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a5632c4e-0eb2-4529-94cb-9fb23028c094",
+              "leftValue": "={{ $json.type }}",
+              "rightValue": "text",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -16,
+        144
+      ],
+      "id": "83196b2a-fd50-4c50-b4ce-f276abba7598",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "chatId": "-1003834103592",
+        "text": "={{ $json.engineer_message }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "reply_to_message_id": "={{ $('Check Open Ticket').item.json.remote_message_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1552,
+        928
+      ],
+      "id": "7c47d817-2543-43eb-8142-cbe3ab65adfa",
+      "name": "Send a text message1",
+      "webhookId": "69e9e75a-de83-4b00-9f79-485e116b674e",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "05b6aa3b-a521-480f-8389-57ef603e6a80",
+              "leftValue": "={{ $json.sender.contact_id }}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1296,
+        688
+      ],
+      "id": "5f196286-1021-400e-98cc-84cd7437ab98",
+      "name": "INFO"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "INFO",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "d92a6d7e-5299-49fa-acde-19cdad6e4770"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "9cf0fb67-772b-40c1-99ee-bbf750fdb489",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "BUG",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "8b3620ad-7e65-4ba8-9ce9-6b77102c2313",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "ACCESS",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "1204d313-ef19-49e8-9e70-65a6af963b6c",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "ESCALATION",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "b497c9b4-f02c-4212-9800-a647a3d43e80",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "FEATURE_REQUEST",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -1488,
+        736
+      ],
+      "id": "f4fbab0b-fcc5-4f63-83a2-9146b4baf1a6",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "0a3651e4-5fb3-495f-9b76-8a876b87a583",
+              "leftValue": "={{ $json.is_new_ticket }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        160,
+        784
+      ],
+      "id": "3d2c5b56-6eee-44b0-8ae0-335f7d30042a",
+      "name": "If: Is New Ticket?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "0a3651e4-5fb3-495f-9b76-8a876b87a583",
+              "leftValue": "={{ $json.is_new_ticket }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        144,
+        16
+      ],
+      "id": "66b0b5b2-9ca5-4815-a7b2-abcd82067b7d",
+      "name": "If: Is New Ticket?1"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "ticket_messages",
+          "mode": "list",
+          "cachedResultName": "ticket_messages"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "telegram_message_id": "={{ $json.result.message_id }}",
+            "ticket_id": "={{ $('Check Open Ticket').item.json.ticket_id }}",
+            "sender_type": "bot_for_client"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "ticket_id",
+              "displayName": "ticket_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "telegram_message_id",
+              "displayName": "telegram_message_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "sender_type",
+              "displayName": "sender_type",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1744,
+        848
+      ],
+      "id": "d3987110-c99f-4ba6-9af6-0170346dd738",
+      "name": "Insert rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "05b6aa3b-a521-480f-8389-57ef603e6a80",
+              "leftValue": "={{ $json.sender.contact_id }}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -880,
+        832
+      ],
+      "id": "3d416a2f-d4f6-464e-9742-3bef107c8f3f",
+      "name": "ACCESS"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Code: Parse AI Decision').item.json.sender.contact_id }}",
+        "subject": "!",
+        "message": "={{ $('Code: Parse AI Decision').item.json.draft_reply }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -544,
+        720
+      ],
+      "id": "6e8cf5d0-5c92-4ecc-aa2f-1a5e51d3b391",
+      "name": "Send access message",
+      "webhookId": "d787b6e2-c8c8-41bd-a240-0fa0edb7df0e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "TtuHbkHWWsLKDk3q",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Code: Parse AI Decision').item.json.sender.contact_id }}",
+        "subject": "!",
+        "message": "={{ $('Code: Parse AI Decision').item.json.draft_reply }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -1056,
+        544
+      ],
+      "id": "856db728-0176-4303-9de7-c95741666982",
+      "name": "Send info message",
+      "webhookId": "d787b6e2-c8c8-41bd-a240-0fa0edb7df0e",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "TtuHbkHWWsLKDk3q",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.sender.contact_id }}",
+        "text": "={{ $json.draft_reply }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -1056,
+        688
+      ],
+      "id": "cd983678-8334-44bb-89b3-d9078ac77ebc",
+      "name": "Send tg info",
+      "webhookId": "d4682a67-bcec-4ae1-8995-f7d67be9270f",
+      "credentials": {
+        "telegramApi": {
+          "id": "YskME959crtIWSje",
+          "name": "Бот Клиент"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.sender.contact_id }}",
+        "text": "={{ $json.draft_reply }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -592,
+        864
+      ],
+      "id": "3f58ad58-0d2f-49fe-99e6-0a913da0f6c1",
+      "name": "Send tg info1",
+      "webhookId": "d4682a67-bcec-4ae1-8995-f7d67be9270f",
+      "credentials": {
+        "telegramApi": {
+          "id": "YskME959crtIWSje",
+          "name": "Бот Клиент"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Code: Parse AI Decision').item.json.category }}",
+                    "rightValue": "BUG",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "8169735a-52c8-4003-86c7-4f7112a25de8"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "6da825d5-659c-45b5-8c2d-4973ea9316eb",
+                    "leftValue": "={{ $('Code: Parse AI Decision').item.json.category }}",
+                    "rightValue": "ESCALATION",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "e0932b47-6d67-40fd-8f50-732e0c106edc",
+                    "leftValue": "={{ $('Code: Parse AI Decision').item.json.category }}",
+                    "rightValue": "FEATURE_REQUEST",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        144,
+        976
+      ],
+      "id": "aec90c96-51bd-46e8-b598-7d6d2a701b2c",
+      "name": "Switch 1 (New Actions)"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "BUG",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "8169735a-52c8-4003-86c7-4f7112a25de8"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "6da825d5-659c-45b5-8c2d-4973ea9316eb",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "ESCALATION",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "e0932b47-6d67-40fd-8f50-732e0c106edc",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "FEATURE_REQUEST",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "e11a5d52-13d0-45b2-9fa0-d0778f9e1b79",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "IMPLEMENTATION",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1280,
+        640
+      ],
+      "id": "84c8cf2d-6893-4bb0-80d6-51d9d9232716",
+      "name": "Switch 2 (Replies)"
+    },
+    {
+      "parameters": {
+        "chatId": "-1003943655482",
+        "text": "={{ $('Code: Prepare L2 Escalation').item.json.engineer_message }}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "🛠 Взять в работу",
+                    "additionalFields": {
+                      "callback_data": "=take_{{ $json.ticket_id }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        400,
+        672
+      ],
+      "id": "829be3d6-c3e5-4623-bb6f-717b1d5d281e",
+      "name": "Публикация Бага",
+      "webhookId": "5f0d3073-37f8-4e1a-9259-8eec6c2c04bb",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-1003943655482",
+        "text": "={{ $('Code: Prepare L2 Escalation').item.json.engineer_message }}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "🚨 ПОДТВЕРДИТЬ АВАРИЮ",
+                    "additionalFields": {
+                      "callback_data": "=ack_{{ $('Code: Prepare L2 Escalation').item.json.ticket_id }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        560,
+        880
+      ],
+      "id": "9c78426d-f47e-4ad5-a648-b037746affdb",
+      "name": "Публикация Аварии",
+      "webhookId": "5f0d3073-37f8-4e1a-9259-8eec6c2c04bb",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-1003943655482",
+        "text": "={{ $('Code: Prepare L2 Escalation').item.json.engineer_message }}",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "💡 Оценить доработку",
+                    "additionalFields": {
+                      "callback_data": "=estimate_{{ $('Code: Prepare L2 Escalation').item.json.ticket_id }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        336,
+        1040
+      ],
+      "id": "ccfd31a1-feb9-4805-bdfc-b1cca2ba19d1",
+      "name": "Публикация доработок",
+      "webhookId": "5f0d3073-37f8-4e1a-9259-8eec6c2c04bb",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE support_tickets\nSET remote_message_id = $1\nWHERE ticket_id = $2;",
+        "options": {
+          "queryReplacement": "={{ $json.result.message_id }},{{ $('Code: Prepare L2 Escalation').item.json.ticket_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        544,
+        1040
+      ],
+      "id": "74efd529-13db-4989-a39b-37c11e5467dd",
+      "name": "Execute a SQL query2",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE support_tickets\nSET remote_message_id = $1\nWHERE ticket_id = $2;",
+        "options": {
+          "queryReplacement": "={{ $json.result.message_id }},{{ $('Code: Prepare L2 Escalation').item.json.ticket_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        576,
+        688
+      ],
+      "id": "7fd7501c-22c0-4f17-84f2-ea6a6d6d01ca",
+      "name": "Bug remote message",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE support_tickets\nSET remote_message_id = $1\nWHERE ticket_id = $2;",
+        "options": {
+          "queryReplacement": "={{ $json.result.message_id }},{{ $('Code: Prepare L2 Escalation').item.json.ticket_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        752,
+        896
+      ],
+      "id": "29026f9d-9a8f-4bc0-acad-75af1037d986",
+      "name": "Авария remote message",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-1003943655482",
+        "text": "={{ $('Code: Prepare L2 Escalation').item.json.engineer_message }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "reply_to_message_id": "={{ $('Check Open Ticket').item.json.remote_message_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1472,
+        592
+      ],
+      "id": "223c78ba-5625-413b-af1b-ada7c10f4df5",
+      "name": "BUG Reply",
+      "webhookId": "5f0d3073-37f8-4e1a-9259-8eec6c2c04bb",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-1003943655482",
+        "text": "={{ $('Code: Prepare L2 Escalation').item.json.engineer_message }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "reply_to_message_id": "={{ $('Check Open Ticket').item.json.remote_message_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1552,
+        768
+      ],
+      "id": "54168504-d613-4a36-9d32-921ca0e440b2",
+      "name": "ESCALATION",
+      "webhookId": "5f0d3073-37f8-4e1a-9259-8eec6c2c04bb",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "-1003943655482",
+        "text": "={{ $('Code: Prepare L2 Escalation').item.json.engineer_message }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "reply_to_message_id": "={{ $('Check Open Ticket').item.json.remote_message_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1552,
+        1104
+      ],
+      "id": "db342624-94a8-419b-bd7b-176db25186bb",
+      "name": "Features Reply",
+      "webhookId": "5f0d3073-37f8-4e1a-9259-8eec6c2c04bb",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "-1003834103592",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "={{ $json.engineer_message }}",
+          "parse_mode": "HTML",
+          "reply_to_message_id": "={{ $('Check Open Ticket').item.json.remote_message_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1264,
+        -352
+      ],
+      "id": "97e3e521-a4f6-4eee-acb7-7b938f7667c8",
+      "name": "Send a photo implementation",
+      "webhookId": "613da688-045c-4c84-a591-a58982b45701",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "-1003943655482",
+        "binaryData": true,
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "reply_to_message_id": "={{ $('Check Open Ticket').item.json.remote_message_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1248,
+        -512
+      ],
+      "id": "e0d1d145-f863-4383-8b3e-abce7cdfb729",
+      "name": "Send a photo features",
+      "webhookId": "613da688-045c-4c84-a591-a58982b45701",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "-1003943655482",
+        "binaryData": true,
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "reply_to_message_id": "={{ $('Check Open Ticket').item.json.remote_message_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1216,
+        -688
+      ],
+      "id": "5669cce8-5ff8-4219-a35d-949436a0e39a",
+      "name": "Send a photo ESCALATION",
+      "webhookId": "613da688-045c-4c84-a591-a58982b45701",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Code: Prepare L2 Escalation').item.json.category }}",
+                    "rightValue": "BUG",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "804177b5-aed4-4929-8732-2552c9380d16"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "78d18a55-de98-4487-b403-8812135dfa9f",
+                    "leftValue": "={{ $('Code: Prepare L2 Escalation').item.json.category }}",
+                    "rightValue": "ESCALATION",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "a390b2f0-e3fd-415d-8805-727f1a9cba19",
+                    "leftValue": "={{ $('Code: Prepare L2 Escalation').item.json.category }}",
+                    "rightValue": "FEATURE_REQUEST",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "85d770aa-21eb-4d88-8bdc-26faaf22be96",
+                    "leftValue": "={{ $('Code: Prepare L2 Escalation').item.json.category }}",
+                    "rightValue": "IMPLEMENTATION",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        736,
+        64
+      ],
+      "id": "33b19289-b671-4d84-9373-a4913ced013b",
+      "name": "old ticket photo"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Code: Prepare L2 Escalation').item.json.category }}",
+                    "rightValue": "BUG",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "804177b5-aed4-4929-8732-2552c9380d16"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "78d18a55-de98-4487-b403-8812135dfa9f",
+                    "leftValue": "={{ $('Code: Prepare L2 Escalation').item.json.category }}",
+                    "rightValue": "ESCALATION",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "a390b2f0-e3fd-415d-8805-727f1a9cba19",
+                    "leftValue": "={{ $('Code: Prepare L2 Escalation').item.json.category }}",
+                    "rightValue": "FEATURE_REQUEST",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "85d770aa-21eb-4d88-8bdc-26faaf22be96",
+                    "leftValue": "={{ $('Code: Prepare L2 Escalation').item.json.category }}",
+                    "rightValue": "IMPLEMENTATION",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        448,
+        -112
+      ],
+      "id": "7a0a54a5-bf2b-4b5b-90c1-2efcb1f6f083",
+      "name": "new ticket photo"
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "-1003943655482",
+        "binaryData": true,
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "reply_to_message_id": "={{ $('Check Open Ticket').item.json.remote_message_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1184,
+        -848
+      ],
+      "id": "797efdc9-d343-463a-9375-a2c4b4ef9bff",
+      "name": "Send a photo BUG",
+      "webhookId": "613da688-045c-4c84-a591-a58982b45701",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "-1003834103592",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "={{ $json.engineer_message }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        912,
+        -112
+      ],
+      "id": "392fff04-4d6f-43cc-b8ca-25dc69d4cc97",
+      "name": "Send a photo implementation1",
+      "webhookId": "613da688-045c-4c84-a591-a58982b45701",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "-1003943655482",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "={{ $json.engineer_message }}",
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        -480
+      ],
+      "id": "24b7c1cb-117f-427e-bbd9-08e69615bed1",
+      "name": "Send a photo FEATURE",
+      "webhookId": "613da688-045c-4c84-a591-a58982b45701",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "-1003943655482",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "={{ $json.engineer_message }}",
+          "disable_notification": true,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        912,
+        -304
+      ],
+      "id": "420c03f4-dd93-46fb-adcc-a0a43e08c2f2",
+      "name": "Send a photo ESCALATION1",
+      "webhookId": "613da688-045c-4c84-a591-a58982b45701",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "-1003943655482",
+        "binaryData": true,
+        "additionalFields": {
+          "caption": "={{ $json.engineer_message }}",
+          "disable_notification": true,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        848,
+        -640
+      ],
+      "id": "afa0018c-8c5b-4882-bced-490738000391",
+      "name": "Send a photo BUG1",
+      "webhookId": "613da688-045c-4c84-a591-a58982b45701",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Check Open Ticket').item.json.status }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "empty",
+                      "singleValue": true
+                    },
+                    "id": "c8cdc57b-4ee6-42e5-bb88-ec25f04bdd1f"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "86221136-f7c9-4276-8225-4c9925ff2abb",
+                    "leftValue": "={{ $('Check Open Ticket').item.json.status }}",
+                    "rightValue": "closed",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "c8f8ae19-dfff-4c3f-a528-4265dada2c31",
+                    "leftValue": "={{ $('Check Open Ticket').item.json.status }}",
+                    "rightValue": "open",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "cad2e9fc-b492-490c-9ef8-f04324ebd81e",
+                    "leftValue": "={{ $('Check Open Ticket').item.json.status }}",
+                    "rightValue": "in_progress",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "d5711bb2-2c42-4db9-bc02-525a3beb56ec",
+                    "leftValue": "={{ $('Check Open Ticket').item.json.status }}",
+                    "rightValue": "pending_client",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -1472,
+        288
+      ],
+      "id": "347e6a5e-90ab-4922-b78d-20a7bca5665e",
+      "name": "Switch1"
+    },
+    {
+      "parameters": {
+        "listId": "69e37506725d5b525b9542f7",
+        "name": "Новый Баг",
+        "description": "={{ $('Code: Prepare L2 Escalation').item.json.engineer_message }}",
+        "additionalFields": {
+          "idLabels": "69e374f7e42d2ac2ff604ea6"
+        }
+      },
+      "type": "n8n-nodes-base.trello",
+      "typeVersion": 1,
+      "position": [
+        800,
+        672
+      ],
+      "id": "c7027c33-f921-4f3f-8c95-1d3301d4637d",
+      "name": "Create a card bug",
+      "credentials": {
+        "trelloApi": {
+          "id": "3W5V7R5PKMiggkGy",
+          "name": "Trello account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "listId": "69e395028c8fb78b7b05055d",
+        "name": "АВАРИЯ",
+        "description": "={{ $('Code: Prepare L2 Escalation').item.json.engineer_message }}",
+        "additionalFields": {
+          "idLabels": "69e374f7e42d2ac2ff604ea4"
+        }
+      },
+      "type": "n8n-nodes-base.trello",
+      "typeVersion": 1,
+      "position": [
+        944,
+        848
+      ],
+      "id": "df5fc0dc-f2c6-482f-8f88-4bc9dfd0032b",
+      "name": "Create a card alarm",
+      "credentials": {
+        "trelloApi": {
+          "id": "3W5V7R5PKMiggkGy",
+          "name": "Trello account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "listId": "69e37519346ca62cb726f197",
+        "name": "Новая доработка ",
+        "description": "={{ $('Code: Prepare L2 Escalation').item.json.engineer_message }}",
+        "additionalFields": {
+          "idLabels": "69e374f7e42d2ac2ff604ea5"
+        }
+      },
+      "type": "n8n-nodes-base.trello",
+      "typeVersion": 1,
+      "position": [
+        752,
+        1056
+      ],
+      "id": "872b8f13-ead5-43ed-a571-ac24de8ef621",
+      "name": "Create a card request",
+      "credentials": {
+        "trelloApi": {
+          "id": "3W5V7R5PKMiggkGy",
+          "name": "Trello account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE support_tickets\nSET trello_card_id = $1\nWHERE ticket_id = $2;",
+        "options": {
+          "queryReplacement": "={{ $json.id }},{{ $('Code: Prepare L2 Escalation').item.json.ticket_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        976,
+        656
+      ],
+      "id": "d49f5276-2afd-46c3-8524-44730a200f61",
+      "name": "Set bug trello id",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE support_tickets\nSET trello_card_id = $1\nWHERE ticket_id = $2;",
+        "options": {
+          "queryReplacement": "={{ $json.id }},{{ $('Code: Prepare L2 Escalation').item.json.ticket_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1104,
+        848
+      ],
+      "id": "8817711a-2b65-4f37-ae85-49cb66f582c4",
+      "name": "Set esc trello id",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO support_dify_locks (contact_id) \nVALUES ($1) \nON CONFLICT (contact_id) DO NOTHING \nRETURNING contact_id;",
+        "options": {
+          "queryReplacement": "={{ $('When Executed by Another Workflow').item.json.sender.contact_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -2960,
+        800
+      ],
+      "id": "ef5e079d-7ad8-40a3-9260-9ad0141cbca8",
+      "name": "DB: Acquire Dify Lock",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM support_dify_locks WHERE contact_id = $1;",
+        "options": {
+          "queryReplacement": "={{ $('When Executed by Another Workflow').item.json.sender.contact_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -192,
+        624
+      ],
+      "id": "f4941f4b-35c9-45a9-a055-4880f3862b50",
+      "name": "DB: Release Dify Lock1",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM support_dify_locks WHERE contact_id = $1;",
+        "options": {
+          "queryReplacement": "={{ $('When Executed by Another Workflow').item.json.sender.contact_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1360,
+        992
+      ],
+      "id": "0ba3afa0-e2c9-4280-b38d-5373994a105e",
+      "name": "DB: Release Dify Lock",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM support_dify_locks WHERE contact_id = $1;",
+        "options": {
+          "queryReplacement": "={{ $('When Executed by Another Workflow').item.json.sender.contact_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1872,
+        704
+      ],
+      "id": "042e08ca-e5c3-4cb3-8fc3-0c65dc824600",
+      "name": "DB: Release Dify Lock2",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE leads_pipeline\nSET conversation_id = $1\nWHERE contact_id = $2 \n  AND (conversation_id IS NULL OR conversation_id = '');",
+        "options": {
+          "queryReplacement": "={{ $json.conversation_id }}, {{ $('Code: Build Dify Payload').item.json.inputs.contact_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -2032,
+        768
+      ],
+      "id": "bfc26871-8483-475d-b5d5-8702e4e87ce4",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "be72ea6f-d4d4-42e8-982b-071421d9ebab",
+              "leftValue": "={{ $json.contact_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -2816,
+        784
+      ],
+      "id": "ba9d1975-a609-43fa-851a-4156e8d9b17f",
+      "name": "is this a client?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c6b3f53c-87b2-4894-bb20-64bd3de835f3",
+              "leftValue": "={{ $('Code: Parse AI Decision').item.json.sender.contact_id }}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -928,
+        368
+      ],
+      "id": "882c49e7-0819-446c-951e-b6da642abfe9",
+      "name": "mail/tg"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Code: Parse AI Decision').item.json.sender.contact_id }}",
+        "subject": "Ticket",
+        "message": "={{ $('Code: Parse AI Decision').item.json.draft_reply }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -576,
+        128
+      ],
+      "id": "7f5ca1c6-9dc0-45fa-a3a8-039779a337e5",
+      "name": "reply",
+      "webhookId": "c39645df-8042-4f22-a1d6-609952924865",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "TtuHbkHWWsLKDk3q",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Code: Parse AI Decision').item.json.sender.contact_id }}",
+        "text": "Ваш запрос зафиксирован, ожидайте ответа от инженеров!",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -560,
+        224
+      ],
+      "id": "22c167d0-196c-4d61-abc5-8e7f9c3076a0",
+      "name": "reply tg",
+      "webhookId": "3f88169a-cba1-48aa-b03f-4aed38709a1a",
+      "credentials": {
+        "telegramApi": {
+          "id": "YskME959crtIWSje",
+          "name": "Бот Клиент"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "47f50fc1-62e5-420b-9dcc-aa7464d389b9",
+              "leftValue": "={{ $('When Executed by Another Workflow').item.json.context.client_status }}",
+              "rightValue": "implementation",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -2624,
+        768
+      ],
+      "id": "47642930-4956-4aeb-9b59-f3c3350c578f",
+      "name": "Project in progress?"
+    },
+    {
+      "parameters": {
+        "resource": "call",
+        "from": "+18142613507",
+        "to": "+380985916112",
+        "twiml": true,
+        "message": "<Response><Say voice=\"alice\" language=\"ru-RU\">Внимание! Критическая авария на проекте. Срочно проверьте Телеграм.</Say></Response>",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.twilio",
+      "typeVersion": 1,
+      "position": [
+        368,
+        880
+      ],
+      "id": "fb1b9276-2160-4fe5-a5d4-5469d3c39e34",
+      "name": "Аварийный звонок дежурному",
+      "credentials": {
+        "twilioApi": {
+          "id": "xrWjPprsqrlKPxdG",
+          "name": "Twilio account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "# **Initial Request vs Ongoing Ticket**\n\n\n",
+        "height": 848,
+        "width": 1904
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        128,
+        480
+      ],
+      "typeVersion": 1,
+      "id": "0159c232-afcd-4137-8b2f-27bb90c9ad8d",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "",
+        "height": 368,
+        "width": 1808
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -3408,
+        640
+      ],
+      "typeVersion": 1,
+      "id": "b49391ec-8f2d-42c3-a511-10e3f3d18bd2",
+      "name": "Sticky Note1"
+    }
+  ],
+  "pinData": {
+    "When Executed by Another Workflow": [
+      {
+        "json": {
+          "metadata": {
+            "event_id": "req_879rol4f1",
+            "timestamp": "2026-04-23T12:39:28.565Z",
+            "source_channel": "email",
+            "target_worker": "worker_support"
+          },
+          "sender": {
+            "contact_id": "akulovil368@gmail.com",
+            "user_type": "client",
+            "name": "Client",
+            "role_or_niche": "Маркетинговая компания"
+          },
+          "payload": {
+            "raw_text": "Что ты их своей rag системы можешь мне подсказать?",
+            "clean_text": "Что ты их своей rag системы можешь мне подсказать?",
+            "has_attachments": false,
+            "files_base64": []
+          },
+          "context": {
+            "crm_deal_id": "29262300",
+            "client_status": "active",
+            "dify_conversation_id": null,
+            "active_ticket_id": "75",
+            "is_awaiting_approval": false
+          }
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Check Open Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Open Ticket": {
+      "main": [
+        [
+          {
+            "node": "DB: Acquire Dify Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request: Dify Chat": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Parse AI Decision": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Build Dify Payload": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request: Dify Chat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB: Create New Ticket": {
+      "main": [
+        [
+          {
+            "node": "mail/tg",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Prepare L2 Escalation": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "If: Is New Ticket?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If: Is New Ticket?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "INFO": {
+      "main": [
+        [
+          {
+            "node": "Send info message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send tg info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "INFO",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Switch1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "ACCESS",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Switch1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "mail/tg",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If: Is New Ticket?": {
+      "main": [
+        [
+          {
+            "node": "Switch 1 (New Actions)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Switch 2 (Replies)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If: Is New Ticket?1": {
+      "main": [
+        [
+          {
+            "node": "new ticket photo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "old ticket photo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message1": {
+      "main": [
+        [
+          {
+            "node": "Insert rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ACCESS": {
+      "main": [
+        [
+          {
+            "node": "Send access message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send tg info1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch 1 (New Actions)": {
+      "main": [
+        [
+          {
+            "node": "Публикация Бага",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Аварийный звонок дежурному",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Публикация доработок",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch 2 (Replies)": {
+      "main": [
+        [
+          {
+            "node": "BUG Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "ESCALATION",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Features Reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a text message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Публикация Бага": {
+      "main": [
+        [
+          {
+            "node": "Bug remote message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Публикация Аварии": {
+      "main": [
+        [
+          {
+            "node": "Авария remote message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Публикация доработок": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bug remote message": {
+      "main": [
+        [
+          {
+            "node": "Create a card bug",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a photo implementation": {
+      "main": [
+        []
+      ]
+    },
+    "old ticket photo": {
+      "main": [
+        [
+          {
+            "node": "Send a photo BUG",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a photo ESCALATION",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a photo features",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a photo implementation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "new ticket photo": {
+      "main": [
+        [
+          {
+            "node": "Send a photo BUG1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a photo ESCALATION1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a photo FEATURE",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a photo implementation1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a photo implementation1": {
+      "main": [
+        []
+      ]
+    },
+    "Execute a SQL query2": {
+      "main": [
+        [
+          {
+            "node": "Create a card request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch1": {
+      "main": [
+        [
+          {
+            "node": "DB: Create New Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB: Create New Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB: Create New Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "mail/tg",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "mail/tg",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Авария remote message": {
+      "main": [
+        [
+          {
+            "node": "Create a card alarm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a card bug": {
+      "main": [
+        [
+          {
+            "node": "Set bug trello id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a card alarm": {
+      "main": [
+        [
+          {
+            "node": "Set esc trello id",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB: Acquire Dify Lock": {
+      "main": [
+        [
+          {
+            "node": "is this a client?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send info message": {
+      "main": [
+        [
+          {
+            "node": "DB: Release Dify Lock1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send tg info": {
+      "main": [
+        [
+          {
+            "node": "DB: Release Dify Lock1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set bug trello id": {
+      "main": [
+        [
+          {
+            "node": "DB: Release Dify Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set esc trello id": {
+      "main": [
+        [
+          {
+            "node": "DB: Release Dify Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create a card request": {
+      "main": [
+        [
+          {
+            "node": "DB: Release Dify Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "BUG Reply": {
+      "main": [
+        [
+          {
+            "node": "DB: Release Dify Lock2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "ESCALATION": {
+      "main": [
+        [
+          {
+            "node": "DB: Release Dify Lock2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Features Reply": {
+      "main": [
+        [
+          {
+            "node": "DB: Release Dify Lock2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Insert rows in a table": {
+      "main": [
+        [
+          {
+            "node": "DB: Release Dify Lock2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send tg info1": {
+      "main": [
+        [
+          {
+            "node": "DB: Release Dify Lock1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send access message": {
+      "main": [
+        [
+          {
+            "node": "DB: Release Dify Lock1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Code: Parse AI Decision",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "is this a client?": {
+      "main": [
+        [
+          {
+            "node": "Project in progress?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "mail/tg": {
+      "main": [
+        [
+          {
+            "node": "reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "reply tg",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "reply": {
+      "main": [
+        [
+          {
+            "node": "Code: Prepare L2 Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "reply tg": {
+      "main": [
+        [
+          {
+            "node": "Code: Prepare L2 Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Project in progress?": {
+      "main": [
+        [
+          {
+            "node": "Code: Prepare L2 Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Build Dify Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Аварийный звонок дежурному": {
+      "main": [
+        [
+          {
+            "node": "Публикация Аварии",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "35bb0d1c-b9b9-4697-b1bd-f1fd917d307c",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "761636f69334fbc63ec2ca98d666fc91250da19cdf07f79e76145e4f4546c080"
+  },
+  "id": "PMi16iNiBzHcEOi2",
+  "tags": []
+}

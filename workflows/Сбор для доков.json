@@ -1,0 +1,479 @@
+{
+  "name": "Сбор для доков",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "contract",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -2208,
+        64
+      ],
+      "id": "52bb272a-ea28-4ad3-b5ac-5daca71cbffb",
+      "name": "Webhook",
+      "webhookId": "ee9df37a-5a36-42af-b7e1-7ec7ca0bb6ea"
+    },
+    {
+      "parameters": {
+        "url": "=https://akulovaef.kommo.com/api/v4/leads/{{ $json.body[\"leads[status][0][id]\"] }}?with=contacts",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1696,
+        80
+      ],
+      "id": "c698ec98-ee7e-49cb-98ce-630a1f38e026",
+      "name": "HTTP Request",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "6qCDKEvRQMDYqMFi",
+          "name": "Kommo"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://akulovaef.kommo.com/api/v4/leads/{{ $json.id }}/notes",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -1488,
+        96
+      ],
+      "id": "9a8c1ccc-2d21-4154-8d0f-755a615a10ea",
+      "name": "HTTP Request1",
+      "credentials": {
+        "httpBearerAuth": {
+          "id": "6qCDKEvRQMDYqMFi",
+          "name": "Kommo"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Проверяем, в каком формате пришли данные от Kommo, и парсим их при необходимости\nlet notesData;\nif (typeof $input.item.json.data === 'string') {\n  notesData = JSON.parse($input.item.json.data);\n} else {\n  notesData = $input.item.json;\n}\n\n// 2. Достаем crm_deal_id прямо из ссылки, которую возвращает сам Kommo\n// Это самый надежный способ, не зависящий от других узлов\nconst urlMatch = notesData._links.self.href.match(/leads\\/(\\d+)/);\nconst crmDealId = urlMatch ? urlMatch[1] : null;\n\n// 3. Вытягиваем самую последнюю заметку\nlet latestNoteText = \"Заметок нет\";\nif (notesData._embedded && notesData._embedded.notes && notesData._embedded.notes.length > 0) {\n  const notesArray = notesData._embedded.notes;\n  // Берем последний элемент массива\n  latestNoteText = notesArray[notesArray.length - 1].params.text; \n}\n\n// 4. Отдаем готовый пакет данных\nreturn {\n  crm_deal_id: crmDealId,\n  target_note: latestNoteText\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1152,
+        112
+      ],
+      "id": "f99b6529-ea4a-4e2c-9f5d-2cdb0a69525d",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT \n    contact_id, \n    company_niche, \n    ai_pain_point, \n    custom_pitch, \n    project_brief, \n    conversation_id\nFROM leads_pipeline \nWHERE crm_deal_id = $1;",
+        "options": {
+          "queryReplacement": "={{ $('Code in JavaScript').item.json.crm_deal_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -656,
+        96
+      ],
+      "id": "29ffdc38-5eeb-4f1c-bada-440863e448d5",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4a0fe800-5437-42e2-9af7-6e820c311659",
+              "leftValue": "={{ $('Execute a SQL query').item.json.contact_id }}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        208,
+        96
+      ],
+      "id": "932083a4-b613-400d-9966-9bd6025a17dd",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dify.ai/v1/chat-messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer app-uEMYuAEDRRW8zFilOjNfHszL"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"inputs\": {\n    \"client_status\": \"onboarding_start\",\n    \"sales_context\": \"Ниша клиента: {{ $json.company_niche }}\\nИзначальная проблема: {{ $json.ai_pain_point }}\\nПредложенное решение: {{ $json.custom_pitch }}\\nБриф проекта (бюджет и сроки): {{ $json.project_brief }}\"\n  },\n  \"query\": \"СИСТЕМНОЕ СООБЩЕНИЕ: Опираясь строго на переданный sales_context, инициируй диалог. Подготовь приветственное сообщение, профессионально распиши детали проекта (бюджет, сроки, задачи) и обязательно запроси 4 реквизита для формирования договора (ФИО подписанта, должность, название компании, ИНН). Запрещено выдумывать любые данные, имена или цены, которых нет в контексте.\",\n  \"response_mode\": \"blocking\",\n  \"user\": \"{{ $json.contact_id }}\"\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -448,
+        96
+      ],
+      "id": "acdd9b6c-1d7c-4cf2-a323-dbf304a7ef74",
+      "name": "HTTP Request2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rawAnswer = $input.item.json.answer;\nconst conversationId = $input.item.json.conversation_id;\n\n// 1. Вырезаем монолог <think>\nlet cleanText = rawAnswer.replace(/<think>[\\s\\S]*?<\\/think>\\n*/g, '').trim();\n\n// 2. Убираем markdown (на случай, если ИИ его добавит)\ncleanText = cleanText.replace(/```json/g, '').replace(/```/g, '').trim();\n\n// 3. Парсим JSON\nlet parsedData = {};\ntry {\n  parsedData = JSON.parse(cleanText);\n} catch (e) {\n  // Запасной план: если ИИ почему-то выдал просто текст\n  parsedData = { reply_to_client: cleanText };\n}\n\n// 4. Достаем нужный текст (ИИ может выдать 'reply_to_client' или 'replytoclient')\nconst finalText = parsedData.reply_to_client || parsedData.replytoclient || parsedData.message || cleanText;\n\nreturn {\n  json: {\n    message_to_send: finalText,\n    conversation_id: conversationId\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        96
+      ],
+      "id": "a58d1680-2966-428b-85f2-e2cf04414677",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE leads_pipeline \nSET \n    conversation_id = '{{ $json.conversation_id }}',\n    client_status = 'onboarding_start'\nWHERE \n    contact_id = '{{ $('Execute a SQL query').item.json.contact_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -32,
+        96
+      ],
+      "id": "263b2163-7359-4ce4-845f-d2b0a5b8e0a9",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('Execute a SQL query').item.json.contact_id }}",
+        "subject": "Оформление Документа",
+        "emailType": "text",
+        "message": "={{ $('Code in JavaScript1').item.json.message_to_send }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        416,
+        0
+      ],
+      "id": "579ff67c-3ed1-4cc7-84fb-50a64428f875",
+      "name": "Send a message",
+      "webhookId": "37485aef-4a46-45dc-abdb-8b7cd849b271",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "TtuHbkHWWsLKDk3q",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Execute a SQL query').item.json.contact_id }}",
+        "text": "={{ $('Code in JavaScript1').item.json.message_to_send }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        416,
+        192
+      ],
+      "id": "37fe72a9-a844-4f30-8501-b82c9595533e",
+      "name": "Send a text message",
+      "webhookId": "b9b6fa0a-672a-44b2-ad0f-896c6fc04620",
+      "credentials": {
+        "telegramApi": {
+          "id": "YskME959crtIWSje",
+          "name": "Бот Клиент"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "9742196e-8b62-4cbd-98a8-68630efc3e6d",
+              "leftValue": "={{ $json.body['leads[status][0][status_id]'] }}",
+              "rightValue": "104588371",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -2000,
+        64
+      ],
+      "id": "918de367-36e2-41f4-80ec-2b849c354b9c",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE leads_pipeline \nSET project_brief = $1 \nWHERE crm_deal_id::text = $2::text;",
+        "options": {
+          "queryReplacement": "={{ [$json.target_note, $json.crm_deal_id] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -944,
+        112
+      ],
+      "id": "f85159aa-f817-4de9-9eb5-e829d07e8217",
+      "name": "Execute a SQL query2",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query1": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query2": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "62d40329-c5e7-4be5-a26a-7aa1e1799893",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "761636f69334fbc63ec2ca98d666fc91250da19cdf07f79e76145e4f4546c080"
+  },
+  "id": "llY3lI6Ax0k1tOv4",
+  "tags": []
+}

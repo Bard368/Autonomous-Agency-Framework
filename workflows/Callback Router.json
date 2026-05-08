@@ -1,0 +1,3023 @@
+{
+  "name": "Callback Router",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "try {\n    const cb = $input.first().json.callback_query;\n    if (!cb) throw new Error(\"Нет данных callback_query\");\n\n    const dataParts = cb.data.split('_');\n    const action = dataParts[0];\n    const ticketId = dataParts[1];\n    const resolution = dataParts[2] || \"none\"; // Извлекаем резолюцию (success/vendor/spam)\n\n    const firstName = cb.from.first_name || \"\";\n    const username = cb.from.username ? `(@${cb.from.username})` : \"\";\n    const engineerName = `${firstName} ${username}`.trim();\n\n    const originalText = cb.message.text || \"\";\n\n    return [{\n        json: {\n            action: action,\n            ticket_id: ticketId,\n            resolution: resolution,\n            message_id: cb.message.message_id,\n            chat_id: cb.message.chat.id,\n            query_id: cb.id,\n            engineer_id: String(cb.from.id),\n            engineer_name: engineerName,\n            original_text: originalText\n        }\n    }];\n} catch (error) {\n    throw new Error(`[Callback Parser Error]: ${error.message}`);\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -272,
+        48
+      ],
+      "id": "ce7f4838-82a9-401b-b85a-86fbf5999bda",
+      "name": "Code: Parse Data"
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $('Code: Parse Data').item.json.chat_id }}",
+        "messageId": "={{ $('Code: Parse Data').item.json.message_id }}",
+        "replyMarkup": "inlineKeyboard",
+        "text": "={{ $('Code: Parse Data').item.json.original_text }}  👨‍💻 *В работе у:* {{ $('Code: Parse Data').item.json.engineer_name }}",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "❄️ Заморозить",
+                    "additionalFields": {
+                      "callback_data": "=freeze_{{ $('Code: Parse Data').item.json.ticket_id }}"
+                    }
+                  },
+                  {
+                    "text": "🏁 Меню закрытия",
+                    "additionalFields": {
+                      "callback_data": "=resolve_{{ $('Code: Parse Data').item.json.ticket_id }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1584,
+        -208
+      ],
+      "id": "cbb8659c-723b-4ae9-b929-8552063f8c34",
+      "name": "TG: Render \"In Progress\"",
+      "webhookId": "6deb26bf-de4e-49a8-b2cc-b844324cc14a",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $('Code: Parse Data').item.json.chat_id }}",
+        "messageId": "={{ $('Code: Parse Data').item.json.message_id }}",
+        "replyMarkup": "inlineKeyboard",
+        "text": "={{ $('Code: Parse Data').item.json.original_text }}  ⚠️ *Укажите резолюцию для тикета #{{ $('Code: Parse Data').item.json.ticket_id }}:*",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "✅ Успешно",
+                    "additionalFields": {
+                      "callback_data": "=close_{{ $('Code: Parse Data').item.json.ticket_id }}_success"
+                    }
+                  },
+                  {
+                    "text": "📡 Баг вендора",
+                    "additionalFields": {
+                      "callback_data": "=close_{{ $('Code: Parse Data').item.json.ticket_id }}_vendor"
+                    }
+                  },
+                  {
+                    "text": "🔙 Вернуться",
+                    "additionalFields": {
+                      "callback_data": "=take_{{ $('Code: Parse Data').item.json.ticket_id }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2016,
+        32
+      ],
+      "id": "bc1e7cea-f203-4c4f-8d34-cd49173bb81a",
+      "name": "TG: Render \"Resolution Menu\"",
+      "webhookId": "46af748a-4aa6-4961-9199-3172d562f318",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{ $('Code: Parse Data').item.json.query_id }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1344,
+        -128
+      ],
+      "id": "46e1144c-e8bd-4b84-8ef3-d4f2a85542da",
+      "name": "TG: Answer Query (Success)",
+      "webhookId": "325dd591-c283-400c-b8a7-59fd7aef3a7e",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{ $('Code: Parse Data').item.json.query_id }}",
+        "additionalFields": {
+          "show_alert": true,
+          "text": "⚠️ Этот тикет уже перехватил другой инженер!"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1328,
+        80
+      ],
+      "id": "ee5739d0-3839-4cc7-999c-882299b1efd3",
+      "name": "TG: Answer Query (Error)",
+      "webhookId": "58714970-0340-4ad3-973b-8c8f1eb2d3cf",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "536180d8-b5eb-4836-ae32-054331e7613b",
+              "leftValue": "={{ $json.ticket_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        832,
+        0
+      ],
+      "id": "ebb83232-5f32-4f81-86fd-4b1686048b2f",
+      "name": "If: Lock Success?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "25a6bba2-1073-45bb-bcbf-999596cd8a59",
+              "leftValue": "={{ $json.assignee_id }}",
+              "rightValue": "={{ $('Code: Parse Data').first().json.engineer_id }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        752,
+        432
+      ],
+      "id": "b2d0ef67-2684-4bee-8ca3-fbb347c09510",
+      "name": "If: Is My Ticket?"
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{ $('Code: Parse Data').item.json.query_id }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1056,
+        352
+      ],
+      "id": "5dcefb79-730a-46a0-9405-4e03b47b0e41",
+      "name": "TG: Answer Query (Success)2",
+      "webhookId": "3498e9c4-5138-4918-8e69-766951f605a5",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{ $('Code: Parse Data').item.json.query_id }}",
+        "additionalFields": {
+          "show_alert": true,
+          "text": "⛔ У вас нет прав. Этот тикет ведет другой сотрудник."
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1200,
+        544
+      ],
+      "id": "3e3aa93e-eeb2-4e58-bf5c-d731246e04e7",
+      "name": "TG: Answer Query (Error)1",
+      "webhookId": "58bc8aca-5e4f-48c5-8f02-af2ba77a39f9",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT assignee_id FROM support_tickets WHERE ticket_id = $1;",
+        "options": {
+          "queryReplacement": "={{ $('Code: Parse Data').item.json.ticket_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        416,
+        208
+      ],
+      "id": "fb3b610c-90c7-41d3-b9ac-5e6afcd0411e",
+      "name": "DB: Auth Check",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Code: Parse Data').item.json.action }}",
+                    "rightValue": "resolve",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "57a9fcf5-e152-4e36-9e34-4ecd79b49a60"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "d176f5c9-0f1a-4f6a-a882-2697bb94f9a9",
+                    "leftValue": "={{ $('Code: Parse Data').item.json.action }}",
+                    "rightValue": "freeze",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "76794fb2-ed22-4af0-8bed-7e92bf8e4b4c",
+                    "leftValue": "={{ $('Code: Parse Data').item.json.action }}",
+                    "rightValue": "close",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "3def3ded-ab91-4fef-9175-12f72240c03b",
+                    "leftValue": "={{ $('Code: Parse Data').item.json.action }}",
+                    "rightValue": "success",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1296,
+        336
+      ],
+      "id": "70aef789-dd5a-4561-bcc1-a2a000d82f26",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE support_tickets \nSET status = 'pending_client', \n    updated_at = NOW() \nWHERE ticket_id = $1\nRETURNING contact_id;",
+        "options": {
+          "queryReplacement": "={{ $('Code: Parse Data').item.json.ticket_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1616,
+        336
+      ],
+      "id": "71813a59-8acd-4492-8c60-c606d3613b8a",
+      "name": "DB: Freeze Ticket",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "8ae4a82c-caec-4962-b41e-560e582c2c57",
+              "leftValue": "={{ $('DB: Freeze Ticket').item.json.contact_id }}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2032,
+        336
+      ],
+      "id": "fe8574e0-f44d-4224-81f4-b560360bb33f",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('DB: Freeze Ticket').item.json.contact_id }}",
+        "text": "=⚠️ Инженеру требуются уточнения по тикету #{{ $('Code: Parse Data').item.json.ticket_id }}. Пожалуйста, пришлите скриншот ошибки или опишите проблему подробнее ответом на это сообщение",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2240,
+        432
+      ],
+      "id": "445a07b2-0f56-47e3-b873-07def95a373c",
+      "name": "TG: Notify Client - Frozen",
+      "webhookId": "7d3e9e49-38d6-4853-bb59-945b15f422b7",
+      "credentials": {
+        "telegramApi": {
+          "id": "YskME959crtIWSje",
+          "name": "Бот Клиент"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE support_tickets \nSET status = 'closed', \n    updated_at = NOW(),\n    resolution = $2\nWHERE ticket_id = $1\nRETURNING contact_id;",
+        "options": {
+          "queryReplacement": "={{ $('Code: Parse Data').item.json.ticket_id }},{{ $('Code: Parse Data').item.json.resolution }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1664,
+        544
+      ],
+      "id": "223b8d06-1829-4b14-adf2-1136670e6ca9",
+      "name": "DB: Close Ticket",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "88c67cc1-06f6-4a3b-9187-c567563165ac",
+              "leftValue": "={{ $('DB: Close Ticket').item.json.contact_id }}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2096,
+        736
+      ],
+      "id": "7869d55f-7261-480a-8943-d0199105c6f9",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('DB: Close Ticket').item.json.contact_id }}",
+        "subject": "Closed ticked",
+        "message": "=🎉 Ваш тикет #{{ $('Code: Parse Data').item.json.ticket_id }} успешно закрыт!  Инженер завершил работы по вашему обращению. Если проблема сохранилась или у вас появились новые вопросы — просто напишите новое сообщение в этот чат.",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2304,
+        640
+      ],
+      "id": "99da0e29-5ffd-48d2-967b-686298be9210",
+      "name": "Mail: Notify Client - Closed",
+      "webhookId": "9e60de94-220e-4733-8dfd-4f62238b4213",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "TtuHbkHWWsLKDk3q",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('DB: Close Ticket').item.json.contact_id }}",
+        "text": "=🎉 Ваш тикет #{{ $('Code: Parse Data').item.json.ticket_id }} успешно закрыт!  Инженер завершил работы по вашему обращению. Если проблема сохранилась или у вас появились новые вопросы — просто напишите новое сообщение в этот чат.",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2304,
+        832
+      ],
+      "id": "32b8fa12-d0ef-45be-a973-d62622b5dd5a",
+      "name": "TG: Notify Client - Closed1",
+      "webhookId": "d35e6ca4-29a0-4f18-9b41-707057bf587b",
+      "credentials": {
+        "telegramApi": {
+          "id": "YskME959crtIWSje",
+          "name": "Бот Клиент"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('DB: Freeze Ticket').item.json.contact_id }}",
+        "subject": "Ticket",
+        "message": "=⚠️ Инженеру требуются уточнения по тикету #{{ $('Code: Parse Data').item.json.ticket_id }}. Пожалуйста, пришлите скриншот ошибки или опишите проблему подробнее ответом на это сообщение",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2240,
+        240
+      ],
+      "id": "4b225415-ddea-40fb-9214-d189110644ea",
+      "name": "Mail: Notify Client - Frozen",
+      "webhookId": "cdb731b3-0ffc-420e-8961-765a41c8bd09",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "TtuHbkHWWsLKDk3q",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $('Code: Parse Data').item.json.chat_id }}",
+        "messageId": "={{ $('Code: Parse Data').item.json.message_id }}",
+        "text": "={{ $('Code: Parse Data').item.json.original_text }}  ━━━━━━━━━━━━━━━━━━ 🔒 *СТАТУС:* ЗАКРЫТ 👨‍💻 *Закрыл(а):* {{ $('Code: Parse Data').item.json.engineer_name }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1872,
+        544
+      ],
+      "id": "8a1818f6-ad28-4737-96f0-459018a11593",
+      "name": "TG: Render \"Closed\"",
+      "webhookId": "2d3b16cc-88b4-4d4a-91bf-8d291e21707c",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $('Code: Parse Data').item.json.chat_id }}",
+        "messageId": "={{ $('Code: Parse Data').item.json.message_id }}",
+        "replyMarkup": "inlineKeyboard",
+        "text": "={{ $('Code: Parse Data').item.json.original_text }}  ⏳ *СТАТУС:* Заморожен (Ожидание ответа клиента)",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "▶️ Вернуть в работу",
+                    "additionalFields": {
+                      "callback_data": "=take_{{ $('Code: Parse Data').item.json.ticket_id }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1824,
+        336
+      ],
+      "id": "4c4ae1e9-2a88-427f-b573-4e629e0d9401",
+      "name": "TG: Render \"Frozen\"",
+      "webhookId": "54dc2716-038a-4d3d-b6d9-44c45073fb0d",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "implementation",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "6f5fdf7a-aa93-42e1-b823-9252b68549ac"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "25fda3a4-98f2-43b0-88cf-5474907b6c30",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "BUG_TRIAGE",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "c9749c13-eb43-4619-9b3a-8cbfeadc3370",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "BUG",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        976,
+        -80
+      ],
+      "id": "8d653c07-8ee5-4917-8f73-a0c2427e95c0",
+      "name": "Switch1"
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $('Code: Parse Data').item.json.chat_id }}",
+        "messageId": "={{ $('Code: Parse Data').item.json.message_id }}",
+        "replyMarkup": "inlineKeyboard",
+        "text": "=={{ $('Code: Parse Data').item.json.original_text }}\n\n━━━━━━━━━━━━━━━━━━\n👨‍💻 Проект ведет: {{ $('Code: Parse Data').item.json.engineer_name }}\n🚀 Статус: Идет настройка",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "✅ Проект запущен (Закрыть)",
+                    "additionalFields": {
+                      "callback_data": "=close_{{ $('Code: Parse Data').item.json.ticket_id }}_success"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1184,
+        -192
+      ],
+      "id": "0c16bb32-f4b9-4319-a526-72c5f86d4b63",
+      "name": "TG: Render \"Project In Progress\"",
+      "webhookId": "440e30f1-80f6-43bf-b0e1-9951ac3bb8be",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "take",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "29835f06-21c5-4096-9d64-ac12eedfb25a"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "518e8ff3-abd6-4764-82c5-56574446885a",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "ack",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "43e64c91-06f7-425a-b0e4-7ede9eebb56a",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "estimate",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "c5f2f4cf-94ff-4fb2-bef8-7f4079e34285",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "close",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "28728e77-4eeb-4957-acca-92d0f765b7f7",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "vendor",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "9f7c91e8-df46-48f1-8a5c-00b01ce34b2e",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "freeze",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "a9315ce1-71d4-4a49-8e6f-f5a0e5a10290",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "success",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "2628d229-df45-47fd-80b8-ef72651b70cb",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "resolve",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -48,
+        16
+      ],
+      "id": "4c1e260c-5760-45ec-bd8a-79d7fdd4b1ae",
+      "name": "Switch2"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE support_tickets\nSET status = 'in_progress',\n    assignee_id = $1,\n    assignee_name = $2,\n    updated_at = NOW()\nWHERE ticket_id = $3\n  AND (assignee_id IS NULL OR assignee_id = $1)\nRETURNING ticket_id, category; -- 🌟 ДОБАВИЛИ КАТЕГОРИЮ",
+        "options": {
+          "queryReplacement": "={{ $('Code: Parse Data').item.json.engineer_id }},{{ $('Code: Parse Data').item.json.engineer_name }},{{ $json.ticket_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        592,
+        32
+      ],
+      "id": "18225933-a0e5-4400-8537-5730548ffbec",
+      "name": "DB: Update Status",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE support_tickets\nSET status = 'in_progress', \n    assignee_id = $2, \n    assignee_name = $3, \n    updated_at = NOW()\nWHERE ticket_id = $1\nRETURNING contact_id;",
+        "options": {
+          "queryReplacement": "={{ $('Code: Parse Data').item.json.ticket_id }},{{ $('Code: Parse Data').item.json.engineer_id }},{{ $('Code: Parse Data').item.json.engineer_name }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        144,
+        512
+      ],
+      "id": "667a57c5-dc4f-4bfe-a4db-84b52fed37f5",
+      "name": "status: in_progress",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $('Code: Parse Data').item.json.chat_id }}",
+        "messageId": "={{ $('Code: Parse Data').item.json.message_id }}",
+        "replyMarkup": "inlineKeyboard",
+        "text": "=🔥 АВАРИЯ (Тикет #{{ $('Code: Parse Data').item.json.ticket_id }}) | ✅ Подтвердил и чинит: {{ $('Code: Parse Data').item.json.engineer_name }}",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "✅ ЗАВЕРШИТЬ",
+                    "additionalFields": {
+                      "callback_data": "=success_{{ $('Code: Parse Data').item.json.ticket_id }}"
+                    }
+                  },
+                  {
+                    "text": "❌ ЛОЖНАЯ ТРЕВОГА",
+                    "additionalFields": {
+                      "callback_data": "=vendor_{{ $('Code: Parse Data').item.json.ticket_id }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        368,
+        608
+      ],
+      "id": "23dc514d-be04-426c-ac13-c2d574174b93",
+      "name": "Edit message ack",
+      "webhookId": "2d3b16cc-88b4-4d4a-91bf-8d291e21707c",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "29d48201-b01a-488e-b299-b04cf84048d6",
+              "leftValue": "={{ $('status: in_progress').item.json.contact_id }}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        672,
+        656
+      ],
+      "id": "8410ae7c-6db1-4224-bd8d-3399692daf0a",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('status: in_progress').item.json.contact_id }}",
+        "subject": "Ticket",
+        "message": "=Дежурный DevOps-инженер принял сигнал об аварии. Мы уже остановили воркфлоу и занимаемся восстановлением систем! 🛠",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        896,
+        608
+      ],
+      "id": "ae46707a-7744-4df6-9be7-6f06b2fbeadc",
+      "name": "Mail: Notify Escalation",
+      "webhookId": "cdb731b3-0ffc-420e-8961-765a41c8bd09",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "TtuHbkHWWsLKDk3q",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('status: in_progress').item.json.contact_id }}",
+        "text": "Дежурный DevOps-инженер принял сигнал об аварии. Мы уже остановили воркфлоу и занимаемся восстановлением систем! 🛠",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        880,
+        752
+      ],
+      "id": "269b1a40-5143-4fd9-9340-68a24afcc89e",
+      "name": "Send a text message",
+      "webhookId": "9645ab56-587c-45b1-ac88-e0dd5dde0a9d",
+      "credentials": {
+        "telegramApi": {
+          "id": "YskME959crtIWSje",
+          "name": "Бот Клиент"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE support_tickets \nSET status = 'resolved', updated_at = NOW() \nWHERE ticket_id = $1 \nRETURNING category, ticket_id;",
+        "options": {
+          "queryReplacement": "={{ $('Code: Parse Data').item.json.ticket_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2544,
+        720
+      ],
+      "id": "09122eb3-ed33-4538-9dc7-a937e6330588",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "BUG",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "5633c715-c80c-4448-888c-e161a608c5fb"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "b251b36f-15dd-47c0-b9c1-50f662915761",
+                    "leftValue": "={{ $json.category }}",
+                    "rightValue": "ESCALATION",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        2752,
+        720
+      ],
+      "id": "ca779ea0-8405-409d-9e12-3dd5c39ddedf",
+      "name": "Bug or Escalation"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "id": {
+          "__rl": true,
+          "value": "={{ $json.trello_card_id }}",
+          "mode": "id"
+        },
+        "updateFields": {
+          "idLabels": "69e374f7e42d2ac2ff604ea1",
+          "idList": "69e395116e65c1bff1398e79",
+          "name": "Авария решена!"
+        }
+      },
+      "type": "n8n-nodes-base.trello",
+      "typeVersion": 1,
+      "position": [
+        3312,
+        848
+      ],
+      "id": "ce592f3c-c1f0-4cf1-9343-bc5660603f27",
+      "name": "Update a card1",
+      "credentials": {
+        "trelloApi": {
+          "id": "3W5V7R5PKMiggkGy",
+          "name": "Trello account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "id": {
+          "__rl": true,
+          "value": "={{ $json.trello_card_id }}",
+          "mode": "id"
+        },
+        "updateFields": {
+          "idList": "69e3750eabb40de86cdbbc82",
+          "name": "Баг решён"
+        }
+      },
+      "type": "n8n-nodes-base.trello",
+      "typeVersion": 1,
+      "position": [
+        3312,
+        640
+      ],
+      "id": "be3e06d9-25e6-487f-8794-a493b098d332",
+      "name": "Update a card2",
+      "credentials": {
+        "trelloApi": {
+          "id": "3W5V7R5PKMiggkGy",
+          "name": "Trello account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE support_tickets\nSET status = 'closed', updated_at = NOW()\nWHERE ticket_id = $1\nRETURNING category, trello_card_id;",
+        "options": {
+          "queryReplacement": "={{ $json.ticket_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        3024,
+        640
+      ],
+      "id": "991aa1dc-8cc8-4487-9e60-da5a0c365902",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE support_tickets\nSET status = 'closed', updated_at = NOW()\nWHERE ticket_id = $1\nRETURNING category, trello_card_id;",
+        "options": {
+          "queryReplacement": "={{ $json.ticket_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2992,
+        832
+      ],
+      "id": "b6807f6a-c545-4584-bc0a-25617192c050",
+      "name": "Execute a SQL query2",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{ $('TG: Catch Callback').item.json.callback_query.id }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1088,
+        752
+      ],
+      "id": "10971bad-7a7a-403c-bdcf-7680f497d82e",
+      "name": "Answer Query a callback",
+      "webhookId": "0e201626-54da-469c-a074-5315e193cf18",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $('Code: Parse Data').item.json.chat_id }}",
+        "messageId": "={{ $('Code: Parse Data').item.json.message_id }}",
+        "replyMarkup": "inlineKeyboard",
+        "text": "=🔥 АВАРИЯ (Тикет #{{ $('Code: Parse Data').item.json.ticket_id }}) | ✅ Подтвердил и чинит: @{{ $('Code: Parse Data').item.json.engineer_name }}",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "✅ ЗАВЕРШИТЬ",
+                    "additionalFields": {
+                      "callback_data": "=close_{{ $('Code: Parse Data').item.json.ticket_id }}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1296,
+        752
+      ],
+      "id": "e459f235-8647-4f54-9157-c10656cc371f",
+      "name": "Edit a text message",
+      "webhookId": "2561dae8-4e5a-4b8f-b420-8ebd0c2a9587",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "callback",
+        "queryId": "={{ $('TG: Catch Callback').item.json.callback_query.id }}",
+        "additionalFields": {
+          "text": "Ожидаю ввод суммы..."
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        320,
+        368
+      ],
+      "id": "d80a02d9-f06a-4fc8-be71-187185accb9d",
+      "name": "Answer Query a callback1",
+      "webhookId": "5aca2030-c7f3-45dd-bc8a-f94214d7f5cb",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $('Code: Parse Data').item.json.chat_id }}",
+        "messageId": "={{ $('Code: Parse Data').item.json.message_id }}",
+        "text": "={{ $('TG: Catch Callback').item.json.callback_query.message.text }}\\n\\n💰 @{{ $('Code: Parse Data').item.json.engineer_name }}, сделайте Reply (Ответить) на это сообщение и напишите сумму оценки в долларах:",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        512,
+        464
+      ],
+      "id": "f714c583-c0fa-42af-8f00-de42d17f4f19",
+      "name": "Edit a text message1",
+      "webhookId": "c3c1047e-5735-4be3-8cb7-1d0a93c15fde",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "83feb04e-0b55-4bb7-aecf-db5efb497336",
+              "leftValue": "={{ $json.message.reply_to_message.message_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            },
+            {
+              "id": "72e4a834-1227-489c-946d-465bf7f8347f",
+              "leftValue": "={{ $json.message.text }}",
+              "rightValue": "/release",
+              "operator": {
+                "type": "string",
+                "operation": "notStartsWith"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -848,
+        -384
+      ],
+      "id": "baf8100c-6a1c-43cc-bf88-b17547fd8e37",
+      "name": "If: Is it a Reply?"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c541f479-c324-4295-8e4e-2bcb07682cee",
+              "leftValue": "={{ $json.message.reply_to_message.text }}",
+              "rightValue": "ЗАПРОС НА ДОРАБОТКУ",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -928,
+        -912
+      ],
+      "id": "5170867d-d000-4ba5-9c5d-51d35f1c6eac",
+      "name": "Stripe"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Execute a SQL query4').item.json.contact_id }}",
+        "text": "=Команда оценила внедрение нового функционала. Сумма: $ {{ $('If: Is it a Reply?').item.json.message.text }} \n\n💳 Оплатить и запустить в работу:  {{ $('Generate invoice').item.json.url }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        96,
+        -1168
+      ],
+      "id": "c59fec0d-84e4-48ec-afd4-8cf57fa8725a",
+      "name": "Send a text message1",
+      "webhookId": "15494bdc-066f-4d58-aee0-2d34195e9adb",
+      "credentials": {
+        "telegramApi": {
+          "id": "YskME959crtIWSje",
+          "name": "Бот Клиент"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.contact_id }}",
+        "subject": "Invoice",
+        "message": "=Команда оценила внедрение нового функционала. Сумма: $ {{ $('If: Is it a Reply?').item.json.message.text }} \n💳 Оплатить и запустить в работу:  {{ $('Generate invoice').item.json.url }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        96,
+        -1312
+      ],
+      "id": "eaa31c82-d669-468d-b1da-da398ef1a4cd",
+      "name": "Send a message1",
+      "webhookId": "8514442c-0dbe-4e0d-a069-68e0fb41b95c",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "TtuHbkHWWsLKDk3q",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT contact_id FROM support_tickets WHERE remote_message_id = $1;",
+        "options": {
+          "queryReplacement": "={{ $('If: Is it a Reply?').item.json.message.reply_to_message.message_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -336,
+        -1248
+      ],
+      "id": "64add6e3-ec50-47a3-8b12-67e97e59c314",
+      "name": "Execute a SQL query4",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "72a6a034-53d9-41ea-ab66-5b1d47e2d238",
+              "leftValue": "={{ $json.contact_id }}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -128,
+        -1248
+      ],
+      "id": "6142e0f1-e0d4-4945-9636-49b38f52b682",
+      "name": "If3"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.callback_query.id }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "string",
+                      "operation": "notEmpty",
+                      "singleValue": true
+                    },
+                    "id": "3b499a52-86f9-460c-b851-5c579ef67bf5"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "8bec6843-58ab-4ed9-9a2b-7d1338b74efd",
+                    "leftValue": "={{ $json.message.message_id }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "number",
+                      "operation": "notEmpty",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -544,
+        32
+      ],
+      "id": "db381032-ff54-467d-b966-d3c97b6ea221",
+      "name": "Switch3"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT contact_id, status\nFROM support_tickets\nWHERE ticket_id = $1;",
+        "options": {
+          "queryReplacement": "={{ $json.ticket_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -512,
+        -816
+      ],
+      "id": "6e2aff44-220e-441b-871b-7d0674a387ec",
+      "name": "DB: Get Contact Info",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d5979675-c401-4591-83f0-f75f16fcb753",
+              "leftValue": "={{ $json.contact_id }}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -304,
+        -816
+      ],
+      "id": "5fadeb73-95f5-49f8-8f68-7bc691cb53b6",
+      "name": "If: Is Email or Telegram?1"
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.contact_id }}",
+        "text": "=👨‍💻 Сообщение от техподдержки:\n{{ $('Code: Extract Reply Data').item.json.engineer_text }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        -96,
+        -720
+      ],
+      "id": "d28dd869-3101-4e1d-a1e5-54419c190f60",
+      "name": "Send a text message3",
+      "webhookId": "bf60eec6-de82-47f8-a90f-357c0deb3315",
+      "credentials": {
+        "telegramApi": {
+          "id": "YskME959crtIWSje",
+          "name": "Бот Клиент"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst repliedMsgText = item.message?.reply_to_message?.text || \"\";\nconst engineerText = item.message?.text || \"\";\n\n// Ищем ID тикета после знака # (буквы, цифры или тире)\nconst match = repliedMsgText.match(/#([a-zA-Z0-9-]+)/);\nconst ticketId = match ? match[1] : null;\n\nreturn {\n    ticket_id: ticketId,\n    engineer_text: engineerText\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        -816
+      ],
+      "id": "ad0818ea-2a47-4ddb-9e21-06b45687c094",
+      "name": "Code: Extract Reply Data"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.contact_id }}",
+        "subject": "👨‍💻 Сообщение от техподдержки:",
+        "message": "={{ $('Code: Extract Reply Data').item.json.engineer_text }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        -96,
+        -912
+      ],
+      "id": "a2d53520-7ccd-49fc-918d-45302127cd3f",
+      "name": "Send a message2",
+      "webhookId": "5ea5425c-d77c-4c73-a1e6-554d447ea9ec",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "TtuHbkHWWsLKDk3q",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE support_tickets\nSET status = 'pending_client', updated_at = NOW()\nWHERE ticket_id = $1 AND status = 'in_progress';",
+        "options": {
+          "queryReplacement": "={{ $('Code: Extract Reply Data').item.json.ticket_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        112,
+        -832
+      ],
+      "id": "f680a2d6-0e33-4698-ad11-182e12ee10b3",
+      "name": "Execute a SQL query5",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nconst text = item.message?.text || \"\";\nconst repliedMsgText = item.message?.reply_to_message?.text || \"\";\n\nconst match = repliedMsgText.match(/#([a-zA-Z0-9-]+)/);\nconst ticketId = match ? match[1] : null;\n\n// Ищем блоки (добавил флаг 'i' на случай, если кто-то напишет [Инструкция] строчными)\nconst instructionMatch = text.match(/\\[ИНСТРУКЦИЯ\\]([\\s\\S]*?)\\[ДОСТУПЫ\\]/i);\nconst instruction = instructionMatch ? instructionMatch[1].trim() : \"Инструкция не найдена.\";\n\nconst credentialsMatch = text.match(/\\[ДОСТУПЫ\\]([\\s\\S]*)/i);\nconst credentials = credentialsMatch ? credentialsMatch[1].trim() : \"Доступы не найдены.\";\n\nreturn [{\n    json: {\n        ticket_id: ticketId,\n        setup_summary: instruction,             // 🌟 Изменили название ключа!\n        infrastructure_accesses: credentials    // 🌟 Изменили название ключа!\n    }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -432,
+        -384
+      ],
+      "id": "f6b316e6-b787-4068-91d2-1718e4622561",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "updates": [
+          "callback_query",
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -752,
+        32
+      ],
+      "id": "06cad652-f174-4b64-bd77-75f3bb867e08",
+      "name": "TG: Catch Callback",
+      "webhookId": "c655c522-8110-486a-836f-c3b5cee55fb0",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT contact_id \nFROM support_tickets \nWHERE ticket_id = $1;",
+        "options": {
+          "queryReplacement": "={{ $('Code in JavaScript').item.json.ticket_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -256,
+        -368
+      ],
+      "id": "689040b2-71dd-4315-b640-0f8157f9efa0",
+      "name": "DB: Get Client Contact",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE support_tickets \nSET status = 'closed', updated_at = NOW() \nWHERE ticket_id = $1;",
+        "options": {
+          "queryReplacement": "={{ $('Code in JavaScript').item.json.ticket_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -80,
+        -336
+      ],
+      "id": "91cbf3c5-b37b-46fd-a672-0bda5ad7eb06",
+      "name": "DB: Close Ticket1",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE leads_pipeline\nSET setup_summary = $2,\ninfrastructure_accesses = $3,\nupdated_at = NOW()\nWHERE contact_id = $1;",
+        "options": {
+          "queryReplacement": "={{ [ $('DB: Get Client Contact').item.json.contact_id, $('Code in JavaScript').item.json.setup_summary, $('Code in JavaScript').item.json.infrastructure_accesses ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        80,
+        -320
+      ],
+      "id": "8cfac337-3e9e-4c63-9deb-16f1db609d00",
+      "name": "DB: Save Credentials",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('DB: Get Client Contact').item.json.contact_id }}",
+        "text": "=🎉 Ваш проект успешно завершен!  🛠 <b>Что было сделано (Инструкция):</b> {{ $('Code in JavaScript').item.json.setup_summary }}\n\n🔐 <b>Ваши доступы:</b> <tg-spoiler>{{ $('Code in JavaScript').item.json.infrastructure_accesses }}</tg-spoiler>  \n\n<i>Доступы надежно сохранены в системе. Спасибо за работу!</i>",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        464,
+        -240
+      ],
+      "id": "842d043d-3db5-4e34-ad3b-d4defc00aa7f",
+      "name": "TG: Send Release Info",
+      "webhookId": "f92b62c1-48b8-4a5e-a82d-5b3ea994c963",
+      "credentials": {
+        "telegramApi": {
+          "id": "YskME959crtIWSje",
+          "name": "Бот Клиент"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.stripe.com/v1/checkout/sessions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "success_url",
+              "value": "https://t.me/Lead3681_bot"
+            },
+            {
+              "name": "mode",
+              "value": "payment"
+            },
+            {
+              "name": "line_items[0][quantity]",
+              "value": "1"
+            },
+            {
+              "name": "line_items[0][price_data][currency]",
+              "value": "usd"
+            },
+            {
+              "name": "line_items[0][price_data][product_data][name]",
+              "value": "Доработка функционала"
+            },
+            {
+              "name": "line_items[0][price_data][unit_amount]",
+              "value": "={{ parseInt($json.message.text) * 100 }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        -624,
+        -1088
+      ],
+      "id": "89dd469b-dac5-4f24-9f20-8f0c677e9905",
+      "name": "Generate invoice",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "k2E2uB5GeNDmB0vC",
+          "name": "Header Auth account 2"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "893c277d-0915-427b-877c-3858159f386e",
+              "leftValue": "={{ $('DB: Get Client Contact').item.json.contact_id }}",
+              "rightValue": "@",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        256,
+        -304
+      ],
+      "id": "69c132cb-ad87-48e2-a542-c7a617fbb9a0",
+      "name": "If4"
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $('DB: Get Client Contact').item.json.contact_id }}",
+        "subject": "🎉 Ваш проект успешно завершен!",
+        "message": "=🛠 <b>Что было сделано (Инструкция):</b> {{ $('Code in JavaScript').item.json.setup_summary }}  \n\n\n\n🔐 <b>Ваши доступы:</b> <tg-spoiler>{{ $('Code in JavaScript').item.json.infrastructure_accesses }}</tg-spoiler>    <i>Доступы надежно сохранены в системе. Спасибо за работу!</i>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        496,
+        -464
+      ],
+      "id": "72afed1b-d1f5-476a-9d59-074b7e74f581",
+      "name": "Send a message",
+      "webhookId": "d4746e26-a9bb-455b-bd74-49699cada3ca",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "TtuHbkHWWsLKDk3q",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## **Project launch and invoice generation** ",
+        "height": 1360,
+        "width": 2096
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1056,
+        -1408
+      ],
+      "typeVersion": 1,
+      "id": "cb6a522d-264c-4f94-9d3e-b20c7f5b73e7",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a3fc997e-1bef-4ebd-8939-5d2668d85b34",
+              "leftValue": "={{ $json.message.text }}",
+              "rightValue": "/release",
+              "operator": {
+                "type": "string",
+                "operation": "startsWith"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -624,
+        -352
+      ],
+      "id": "ee828ad7-9f65-4a85-bfbd-7fe0f9c2e39a",
+      "name": "If: release Command?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE leads_pipeline \nSET client_status = 'active', \n    conversation_id = NULL,    -- 🌟 ВОТ ОНА, МАГИЯ АМНЕЗИИ\n    updated_at = NOW() \nWHERE contact_id = $1;",
+        "options": {
+          "queryReplacement": "={{ $('DB: Get Client Contact').item.json.contact_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        736,
+        -352
+      ],
+      "id": "28eaf9a7-a2a3-4290-b83f-e499d11b734e",
+      "name": "Set client_status",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "TG: Catch Callback": [
+      {
+        "json": {
+          "update_id": 317937194,
+          "message": {
+            "message_id": 219,
+            "from": {
+              "id": 8071719623,
+              "is_bot": false,
+              "first_name": "Илья",
+              "username": "babard7",
+              "language_code": "en"
+            },
+            "chat": {
+              "id": -1003834103592,
+              "title": "Инженерный чат",
+              "type": "supergroup"
+            },
+            "date": 1776939894,
+            "message_thread_id": 216,
+            "reply_to_message": {
+              "message_id": 218,
+              "from": {
+                "id": 8658535754,
+                "is_bot": true,
+                "first_name": "Engenieer bot",
+                "username": "Engenieer368_bot"
+              },
+              "chat": {
+                "id": -1003834103592,
+                "title": "Инженерный чат",
+                "type": "supergroup"
+              },
+              "date": 1776939520,
+              "message_thread_id": 216,
+              "text": "💬 ОТВЕТ КЛИЕНТА (Тикет #101)\n🏢 CRM: Карточка клиента\n👤 От кого: Client\n\n📝 ТЕКСТ:\nцоиащцуиауа\n\nчт, 23 апр. 2026 г. в 13:01, <jikoyibo@gmail.com>:\n\n> Предоставьте ещё доступ к апи ютуба\n>\n> ---\n> *This email was sent automatically with n8n\n> <https://n8n.io/?utm_source=n8n-internal&utm_medium=powered_by&utm_campaign=n8n-nodes-base.gmail_761636f69334fbc63ec2ca98d666fc91250da19cdf07f79e76145e4f4546c080>*",
+              "entities": [
+                {
+                  "offset": 3,
+                  "length": 26,
+                  "type": "bold"
+                },
+                {
+                  "offset": 33,
+                  "length": 4,
+                  "type": "bold"
+                },
+                {
+                  "offset": 38,
+                  "length": 16,
+                  "type": "text_link",
+                  "url": "https://jikoyibo.kommo.com/leads/detail/29262300"
+                },
+                {
+                  "offset": 58,
+                  "length": 8,
+                  "type": "bold"
+                },
+                {
+                  "offset": 78,
+                  "length": 6,
+                  "type": "bold"
+                },
+                {
+                  "offset": 128,
+                  "length": 18,
+                  "type": "email"
+                },
+                {
+                  "offset": 245,
+                  "length": 160,
+                  "type": "url"
+                }
+              ],
+              "link_preview_options": {
+                "is_disabled": true
+              }
+            },
+            "text": "/release\n\n[ИНСТРУКЦИЯ]\nНастроили платёжную интеграцию со Stripe, база данных развернута на Neon. Автоматизация тестирования включена.\n\n[ДОСТУПЫ]\nDify: admin / пароль123\nn8n: user / пароль321",
+            "entities": [
+              {
+                "offset": 0,
+                "length": 8,
+                "type": "bot_command"
+              }
+            ]
+          }
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Code: Parse Data": {
+      "main": [
+        [
+          {
+            "node": "Switch2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG: Answer Query (Success)": {
+      "main": [
+        [
+          {
+            "node": "TG: Render \"In Progress\"",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If: Lock Success?": {
+      "main": [
+        [
+          {
+            "node": "Switch1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TG: Answer Query (Error)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If: Is My Ticket?": {
+      "main": [
+        [
+          {
+            "node": "TG: Answer Query (Success)2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TG: Answer Query (Error)1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG: Answer Query (Success)2": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB: Auth Check": {
+      "main": [
+        [
+          {
+            "node": "If: Is My Ticket?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "TG: Render \"Resolution Menu\"",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB: Freeze Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB: Close Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB: Close Ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB: Freeze Ticket": {
+      "main": [
+        [
+          {
+            "node": "TG: Render \"Frozen\"",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Mail: Notify Client - Frozen",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TG: Notify Client - Frozen",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB: Close Ticket": {
+      "main": [
+        [
+          {
+            "node": "TG: Render \"Closed\"",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If2": {
+      "main": [
+        [
+          {
+            "node": "Mail: Notify Client - Closed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TG: Notify Client - Closed1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG: Render \"Closed\"": {
+      "main": [
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG: Render \"Frozen\"": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch1": {
+      "main": [
+        [
+          {
+            "node": "TG: Render \"Project In Progress\"",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TG: Answer Query (Success)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TG: Answer Query (Success)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch2": {
+      "main": [
+        [
+          {
+            "node": "DB: Update Status",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "status: in_progress",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Answer Query a callback1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB: Auth Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB: Auth Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB: Auth Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB: Auth Check",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "DB: Auth Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB: Update Status": {
+      "main": [
+        [
+          {
+            "node": "If: Lock Success?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "status: in_progress": {
+      "main": [
+        [
+          {
+            "node": "Edit message ack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit message ack": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Mail: Notify Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mail: Notify Client - Closed": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG: Notify Client - Closed1": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Bug or Escalation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bug or Escalation": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute a SQL query2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update a card2": {
+      "main": [
+        []
+      ]
+    },
+    "Execute a SQL query1": {
+      "main": [
+        [
+          {
+            "node": "Update a card2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query2": {
+      "main": [
+        [
+          {
+            "node": "Update a card1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [
+          {
+            "node": "Answer Query a callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mail: Notify Escalation": {
+      "main": [
+        [
+          {
+            "node": "Answer Query a callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer Query a callback": {
+      "main": [
+        [
+          {
+            "node": "Edit a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer Query a callback1": {
+      "main": [
+        [
+          {
+            "node": "Edit a text message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If: Is it a Reply?": {
+      "main": [
+        [
+          {
+            "node": "If: release Command?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If: release Command?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stripe": {
+      "main": [
+        [
+          {
+            "node": "Generate invoice",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code: Extract Reply Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query4": {
+      "main": [
+        [
+          {
+            "node": "If3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If3": {
+      "main": [
+        [
+          {
+            "node": "Send a message1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a text message1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch3": {
+      "main": [
+        [
+          {
+            "node": "Code: Parse Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If: Is it a Reply?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB: Get Contact Info": {
+      "main": [
+        [
+          {
+            "node": "If: Is Email or Telegram?1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If: Is Email or Telegram?1": {
+      "main": [
+        [
+          {
+            "node": "Send a message2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send a text message3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Extract Reply Data": {
+      "main": [
+        [
+          {
+            "node": "DB: Get Contact Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message2": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message3": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG: Catch Callback": {
+      "main": [
+        [
+          {
+            "node": "Switch3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "DB: Get Client Contact",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB: Get Client Contact": {
+      "main": [
+        [
+          {
+            "node": "DB: Close Ticket1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB: Close Ticket1": {
+      "main": [
+        [
+          {
+            "node": "DB: Save Credentials",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB: Save Credentials": {
+      "main": [
+        [
+          {
+            "node": "If4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "TG: Send Release Info": {
+      "main": [
+        [
+          {
+            "node": "Set client_status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate invoice": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If4": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "TG: Send Release Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Set client_status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If: release Command?": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Stripe",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "34bf2a1f-a698-4154-941a-e4c6bddb4c98",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "761636f69334fbc63ec2ca98d666fc91250da19cdf07f79e76145e4f4546c080"
+  },
+  "id": "8A0lQ4kbYI1o1WzA",
+  "tags": []
+}

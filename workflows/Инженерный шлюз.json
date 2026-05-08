@@ -1,0 +1,314 @@
+{
+  "name": "Инженерный шлюз",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "tally-keys",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "689f09d9-d3a1-4162-adbc-82fc0d5c2c96",
+      "name": "Webhook",
+      "webhookId": "4d929ea8-aa7f-4631-8f9e-5c761328ba25"
+    },
+    {
+      "parameters": {
+        "jsCode": "const fields = $input.item.json.body.data.fields || [];\nlet parsedData = {};\n\nfields.forEach(f => {\n    // Вытягиваем скрытое поле. В Tally скрытые поля обычно имеют key, совпадающий с названием\n    if (f.key === \"contact_id\" || f.label === \"contact_id\") {\n        parsedData.contact_id = f.value;\n    } else {\n        // Вытягиваем остальные ответы\n        parsedData[f.label] = f.value || \"Не заполнено\";\n    }\n});\n\n// ПРЕДОХРАНИТЕЛЬ:\nif (!parsedData.contact_id) {\n    throw new Error(\"ОШИБКА: Форма заполнена без contact_id! Клиент перешел по прямой ссылке.\");\n}\n\nreturn { json: parsedData };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "eefc19be-b9fb-48c9-8d23-06f5649c23c4",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "chatId": "=-1003834103592",
+        "text": "==🚀 <b>НОВЫЙ ПРОЕКТ #{{ $('Execute a SQL query').item.json.ticket_id }}: СТАРТ ИНТЕГРАЦИИ</b>\n🏢 <b>CRM:</b> <a href=\"https://akulovaef.kommo.com/leads/detail/{{ $('Execute a SQL query1').item.json.crm_deal_id }}\">Карточка сделки</a>\n\n📋 <b>ПРОЕКТНЫЙ БРИФ:</b>\n<i>{{ $('Code in JavaScript1').item.json.text }}</i>\n\n🔐 <b>ДАННЫЕ ИНТЕГРАЦИИ (TALLY):</b>\n• <b>Домен CRM:</b> <code>{{ $('Code in JavaScript').item.json['Базовый домен CRM:'] }}</code>\n• <b>Google Calendar:</b> <code>{{ $('Code in JavaScript').item.json['Email администратора Google Calendar:'] }}</code>\n• <b>OpenAI API:</b> <code>{{ $('Code in JavaScript').item.json['OpenAI API Key:'] }}</code>\n• <b>TG Team Bot:</b> <code>{{ $('Code in JavaScript').item.json['Telegram Bot Token для сотрудников:'] }}</code>\n• <b>TG Client Bot:</b> <code>{{ $('Code in JavaScript').item.json['Telegram Bot Token для Клиентов:'] }}</code>\n• <b>Insta/FB Token:</b> <code>{{ $('Code in JavaScript').item.json['Instagram / Facebook Access Token:'] }}</code>\n\n⚠️ <i>Инженеры, разберите проект. Для связи с клиентом используйте Reply на это сообщение.</i>",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": []
+        },
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1216,
+        0
+      ],
+      "id": "0602c08a-1bf8-4510-9565-f2808169680c",
+      "name": "Send a text message",
+      "webhookId": "c8f4119c-643e-4e06-9071-bebd48676114",
+      "credentials": {
+        "telegramApi": {
+          "id": "5EOMscc8jrg5zNEK",
+          "name": "Бот сотрудник"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT crm_deal_id \nFROM leads_pipeline \nWHERE contact_id = '{{ $('Code in JavaScript').item.json.contact_id }}' \nORDER BY updated_at DESC \nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        368,
+        0
+      ],
+      "id": "5adcd0d4-4c76-42ef-a478-d67d9f5e9515",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://akulovaef.kommo.com/api/v4/leads/{{ $json.crm_deal_id }}/notes",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "order[created_at]",
+              "value": "desc"
+            },
+            {
+              "name": "filter[note_type]",
+              "value": "common"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImp0aSI6IjY4MGE5YjczZTNjNzg5N2M5NzZhMDdkMmQ3NmI0MjNjOWZjMTYyYTAwM2I2ZWU5ZWVlNzU2Nzk5MzM3YzdhY2ViMDU0ZTRiNmI0OGUxYzRjIn0.eyJhdWQiOiIxMDU3NzgzOC02Y2E5LTQyM2QtYmRmNy1hZjc3ODUzYjM1N2UiLCJqdGkiOiI2ODBhOWI3M2UzYzc4OTdjOTc2YTA3ZDJkNzZiNDIzYzlmYzE2MmEwMDNiNmVlOWVlZTc1Njc5OTMzN2M3YWNlYjA1NGU0YjZiNDhlMWM0YyIsImlhdCI6MTc3NjM3MDY1NCwibmJmIjoxNzc2MzcwNjU0LCJleHAiOjE3OTk0NTI4MDAsInN1YiI6IjE1MTIwNDM1IiwiZ3JhbnRfdHlwZSI6IiIsImFjY291bnRfaWQiOjM2MzQ4NDgzLCJiYXNlX2RvbWFpbiI6ImtvbW1vLmNvbSIsInZlcnNpb24iOjIsInNjb3BlcyI6WyJwdXNoX25vdGlmaWNhdGlvbnMiLCJmaWxlcyIsImNybSIsImZpbGVzX2RlbGV0ZSIsIm5vdGlmaWNhdGlvbnMiXSwiaGFzaF91dWlkIjoiZmZiMzMyYTMtMmJkZS00YTQyLWIyMzYtOWMzMzEzZDAzN2UyIiwiYXBpX2RvbWFpbiI6ImFwaS1jLmtvbW1vLmNvbSJ9.ABSyY1oJwgO_-znjKAuLpE7bYkFqHa0up0dQnXfBgIrJcOkms771j3CeC0oltQ6iRUaDJvSXnY8hjAapquVMTg-HhTC9AHFfS43vkU1l6tkGgdeOaHxVYl-iI8rg9ZtGnhep6tY-5IaT7r2Q0_AkdoTHBg9LXmqsW2zNmm8jqufYv7pZyQ6A56jtszR-HkeVjd54BBQYQ9CcMEQbWRj-CSSQGsCcSLEMW8CxUapf5S_AtukeSxrZREpEHnqdcRInFHJDUzHybFd6yPM7gopCenWWsp3aA0BNpB4Mb2-3PewAx3cxIItNuxzSorlD-8qsFw_saIZQPis4qViWuHHEZQ"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        608,
+        0
+      ],
+      "id": "72728a40-3646-423d-a37e-16b01df21ec7",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n    const rawData = $input.first().json.data;\n    const parsedData = JSON.parse(rawData);\n\n    // Проверяем, есть ли вообще заметки\n    if (!parsedData._embedded || !parsedData._embedded.notes || parsedData._embedded.notes.length === 0) {\n        return []; // Если пусто - тихо останавливаемся\n    }\n\n    const notes = parsedData._embedded.notes;\n    \n    // БЕРЕМ СТРОГО КРАЙНЮЮ (ПОСЛЕДНЮЮ) ЗАМЕТКУ ИЗ МАССИВА\n    const latestNote = notes[notes.length - 1]; \n\n    // Конвертируем время для этой единственной заметки\n    const dateObj = new Date(latestNote.created_at * 1000);\n    const dateStr = dateObj.toLocaleString('ru-RU', {\n        day: '2-digit', month: '2-digit', year: 'numeric',\n        hour: '2-digit', minute: '2-digit',\n        timeZone: 'Europe/Kyiv'\n    });\n\n    const text = latestNote.params.text || \"[Пустая заметка]\";\n\n    // Отдаем дальше ОДИН объект с самой свежей информацией\n    return [{\n        json: {\n            note_id: latestNote.id,\n            created_at_formatted: dateStr,\n            note_type: latestNote.note_type,\n            text: text\n        }\n    }];\n\n} catch (error) {\n    return [{ \n        json: { \n            error_status: true,\n            error_message: \"Ошибка парсинга: \" + error.message \n        } \n    }];\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        816,
+        0
+      ],
+      "id": "d6e1867d-f0d3-4250-adb7-6f4b13b52074",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH update_lead AS (\n    UPDATE leads_pipeline\n    SET client_status = 'implementation', updated_at = NOW()\n    WHERE contact_id = $1\n)\nINSERT INTO support_tickets (contact_id, category, priority, status, description, created_at, updated_at)\nVALUES ($1, 'implementation', 'high', 'open', 'Запуск проекта интеграции (Tally)', NOW(), NOW())\nRETURNING ticket_id;",
+        "options": {
+          "queryReplacement": "={{ $('Code in JavaScript').item.json.contact_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1024,
+        0
+      ],
+      "id": "d2da32ee-8620-4654-8abd-228cc00e7b31",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE support_tickets\nSET remote_message_id = $1\nWHERE ticket_id = $2;",
+        "options": {
+          "queryReplacement": "={{ $json.result.message_id }}, {{ $('Execute a SQL query').item.json.ticket_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1424,
+        0
+      ],
+      "id": "27b35a50-e4ca-4377-b255-a2f34ebabc6f",
+      "name": "Execute a SQL query2",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO ticket_messages (ticket_id, telegram_message_id, sender_type)\nVALUES ($1, $2, 'bot_for_client');",
+        "options": {
+          "queryReplacement": "={{ $('Execute a SQL query').item.json.ticket_id }}, {{ $('Send a text message').item.json.result.message_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1632,
+        0
+      ],
+      "id": "7c4d5fed-2a9b-4685-8382-5f895668de7a",
+      "name": "Execute a SQL query3",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query2": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query3": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "7102c40e-153e-4341-81f4-53660dcaf186",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "761636f69334fbc63ec2ca98d666fc91250da19cdf07f79e76145e4f4546c080"
+  },
+  "id": "VTYnFn41yztmQZuT",
+  "tags": []
+}

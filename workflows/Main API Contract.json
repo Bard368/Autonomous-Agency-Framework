@@ -1,0 +1,715 @@
+{
+  "name": "Main API Contract",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {
+          "download": true
+        }
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1360,
+        224
+      ],
+      "id": "a6834076-4df4-4fde-bdc9-1f3bbe26436d",
+      "name": "Telegram Trigger",
+      "webhookId": "b2b8b8e4-a3fb-4b38-89e9-091a359dfe83",
+      "credentials": {
+        "telegramApi": {
+          "id": "YskME959crtIWSje",
+          "name": "Бот Клиент"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "format": "resolved",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2.1,
+      "position": [
+        -1376,
+        48
+      ],
+      "id": "eb7c6027-ae89-4f36-aea2-cdadfffd9077",
+      "name": "Email Trigger (IMAP)",
+      "credentials": {
+        "imap": {
+          "id": "g73NEm5JnGU2KB4w",
+          "name": "IMAP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH input AS (\n    -- Шаг 1: Принимаем входящие данные от n8n\n    SELECT \n        $1::text AS sender_identifier, \n        $2::text AS channel \n),\nemployee_search AS (\n    -- Шаг 2: Ищем в сотрудниках (team_directory)\n    SELECT \n        'employee'::text AS user_type,\n        full_name::text AS name,\n        user_role::text AS role_or_niche,\n        NULL::text AS crm_deal_id,\n        NULL::text AS client_status,\n        dify_conversation_id::text AS dify_conversation_id, \n        NULL::text AS active_ticket_id\n    FROM team_directory, input\n    WHERE input.sender_identifier != 'unknown' -- 🛡️ ЗАЩИТА ОТ ЗАГЛУШЕК\n      AND (\n        (input.channel = 'telegram' AND team_directory.telegram_id::text = input.sender_identifier)\n        OR \n        (input.channel = 'email' AND team_directory.email = input.sender_identifier)\n      )\n    LIMIT 1\n),\nclient_search AS (\n    -- Шаг 3: Ищем в клиентах (leads_pipeline)\n    SELECT \n        'client'::text AS user_type,\n        'Client'::text AS name, \n        company_niche::text AS role_or_niche,\n        crm_deal_id::text AS crm_deal_id,\n        client_status::text AS client_status,\n        conversation_id::text AS dify_conversation_id\n    FROM leads_pipeline, input\n    WHERE input.sender_identifier != 'unknown' -- 🛡️ ЗАЩИТА ОТ ЗАГЛУШЕК\n      AND leads_pipeline.contact_id = input.sender_identifier\n    LIMIT 1\n),\nactive_ticket AS (\n    -- Шаг 4: Ищем открытые тикеты для клиента (support_tickets)\n    SELECT ticket_id::text AS ticket_id\n    FROM support_tickets, input\n    WHERE input.sender_identifier != 'unknown' -- 🛡️ ЗАЩИТА ОТ ЗАГЛУШЕК\n      AND support_tickets.contact_id = input.sender_identifier\n      AND status != 'closed' \n    LIMIT 1\n),\ncombined_client_data AS (\n    -- Шаг 5: Склеиваем клиента с его тикетом\n    SELECT \n        c.user_type, c.name, c.role_or_niche, c.crm_deal_id, c.client_status, c.dify_conversation_id,\n        t.ticket_id AS active_ticket_id\n    FROM client_search c\n    LEFT JOIN active_ticket t ON true\n)\n-- Шаг 6: Выводим результат\nSELECT * FROM employee_search\nUNION ALL\nSELECT * FROM combined_client_data\nLIMIT 1;",
+        "options": {
+          "queryReplacement": "={{ [$('Input Normalizer').first().json.sender_id, $('Input Normalizer').first().json.channel] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -656,
+        16
+      ],
+      "id": "cb58013c-d186-4f8d-9699-3ea1c4451ffa",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n  // 1. ДАННЫЕ ИЗ БАЗЫ (Результат SQL-запроса)\n  const dbContext = $input.first() ? $input.first().json : null; \n\n  // 🌟 МАГИЯ ВОССТАНОВЛЕНИЯ ТЕКСТА ИЗ ПЕРВОИСТОЧНИКА 🌟\n  let realRawText = \"\";\n  let sourceChannel = \"telegram\";\n  let senderId = \"unknown\";\n\n  const allStartItems = $('Input Normalizer').all();\n  if (allStartItems && allStartItems.length > 0) {\n      // Ищем тот самый вебхук, в котором был текст (игнорируя пустые фото и \"null\")\n      for (const item of allStartItems) {\n          const text = item.json.raw_text;\n          if (text && String(text).toLowerCase() !== \"null\" && String(text).trim() !== \"\") {\n              realRawText = item.json.raw_text;\n          }\n      }\n      // Берем базовые данные\n      sourceChannel = allStartItems[0].json.channel || \"telegram\";\n      senderId = allStartItems[0].json.sender_id || \"unknown\";\n  }\n\n  // 2. ДАННЫЕ С ФОТОГРАФИЯМИ\n  let filesBase64 = [];\n  let hasAttachments = false;\n  const aggregateNode = $('Code: Aggregate Album');\n\n  if (aggregateNode && aggregateNode.isExecuted) {\n      // Если это альбом — берем склеенные фотки\n      const aggData = aggregateNode.first().json;\n      filesBase64 = aggData.files_base64 || [];\n      hasAttachments = true;\n  } else {\n      // Обычное сообщение\n      if (allStartItems && allStartItems.length > 0) {\n          filesBase64 = allStartItems[0].json.files_base64 || [];\n          hasAttachments = filesBase64.length > 0;\n      }\n  }\n\n  // 3. ЛОГИКА МАРШРУТИЗАЦИИ\n  let targetWorker = \"worker_sdr\"; // По умолчанию - продажи\n  let isKnown = false;\n\n  if (dbContext && dbContext.user_type) {\n    isKnown = true;\n    if (dbContext.user_type === \"employee\") {\n      targetWorker = \"worker_internal_ops\";\n    } else if (dbContext.user_type === \"client\") {\n      const clientStatus = dbContext.client_status;\n      \n      // 🌟 ИСПРАВЛЕНИЕ: Разделили зоны ответственности (Separation of Concerns)\n      const salesStages = [\"lead\", \"onboarding_start\", \"active_sales\"]; \n      const supportStages = [\"implementation\", \"active\"];\n\n      if (salesStages.includes(clientStatus)) {\n          targetWorker = \"worker_sdr\";\n      } else if (supportStages.includes(clientStatus)) {\n          targetWorker = \"worker_support\"; // Внедрение и поддержка идут к технарям!\n      } else {\n          // Fallback-предохранитель\n          targetWorker = dbContext.active_ticket_id ? \"worker_support\" : \"worker_sdr\";\n      }\n    }\n  }\n\n  // 4. СБОРКА ENTERPRISE-КОНТРАКТА\n  const payload = {\n    metadata: {\n      event_id: `req_${Math.random().toString(36).substr(2, 9)}`,\n      timestamp: new Date().toISOString(),\n      source_channel: sourceChannel, \n      target_worker: targetWorker\n    },\n    sender: {\n      contact_id: senderId,\n      user_type: isKnown ? dbContext.user_type : \"unknown\",\n      name: isKnown ? dbContext.name : \"Unknown\",\n      role_or_niche: isKnown ? dbContext.role_or_niche : null\n    },\n    payload: {\n      raw_text: realRawText,\n      clean_text: realRawText ? realRawText.trim() : \"\",\n      has_attachments: hasAttachments,\n      files_base64: filesBase64 \n    },\n    context: {\n      crm_deal_id: isKnown ? dbContext.crm_deal_id : null,\n      client_status: isKnown ? dbContext.client_status : null,\n      dify_conversation_id: isKnown ? dbContext.dify_conversation_id : null,\n      active_ticket_id: isKnown ? dbContext.active_ticket_id : null,\n      is_awaiting_approval: false \n    }\n  };\n\n  // 5. ВЫДАЧА\n  return [{ json: payload }];\n\n} catch (error) {\n  throw new Error(`[Payload Builder Error]: Ошибка сборки контракта. Причина: ${error.message}`);\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -448,
+        16
+      ],
+      "id": "b99c3855-a81b-4e4d-821c-b0d1a3f8c6c1",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.metadata.target_worker }}",
+                    "rightValue": "worker_sdr",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "72b014e3-57bb-4058-997b-930d91bc6395"
+                  }
+                ],
+                "combinator": "and"
+              }
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "c585fcd3-83d1-46f9-a85d-f8bbec288435",
+                    "leftValue": "={{ $json.metadata.target_worker }}",
+                    "rightValue": "worker_support",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -240,
+        16
+      ],
+      "id": "02cba8fa-5def-46c0-93a3-91465591f531",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "PMi16iNiBzHcEOi2",
+          "mode": "id",
+          "cachedResultUrl": "/workflow/PMi16iNiBzHcEOi2"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -32,
+        112
+      ],
+      "id": "94371ad2-8998-451f-9842-f0050d7c8156",
+      "name": "Call 'Worker: Support Pipeline'"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "55c3959f-0ebb-4e45-ac91-f2443cc453ea",
+              "leftValue": "={{ $json.media_group_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -960,
+        0
+      ],
+      "id": "89798293-f446-4907-a8f2-5038f3e3ecf2",
+      "name": "If: Is Album?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO tg_album_files (media_group_id, base64_data, caption) \nVALUES ($1, $2, $3);",
+        "options": {
+          "queryReplacement": "={{ $json.media_group_id }}, {{ JSON.stringify($json.files_base64) }}, {{ $json.raw_text || null }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1232,
+        -224
+      ],
+      "id": "c87f54b2-5130-4895-9e0d-bf7dea2f05a9",
+      "name": "DB: Save Album File",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH inserted AS (\n    INSERT INTO tg_album_locks (media_group_id)\n    VALUES ($1)\n    ON CONFLICT (media_group_id) DO NOTHING\n    RETURNING media_group_id\n)\nSELECT \n    CASE \n        WHEN EXISTS (SELECT 1 FROM inserted) THEN 'LEADER'\n        ELSE 'FOLLOWER'\n    END as role;",
+        "options": {
+          "queryReplacement": "={{ $('Input Normalizer').item.json.media_group_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1024,
+        -224
+      ],
+      "id": "1f7bce2f-8d52-450b-8aa3-128d91a83bf2",
+      "name": "DB: Elect Leader",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "c6e5e4cb-30bf-4a27-86da-a0432b6115b6",
+              "leftValue": "={{ $json.role }}",
+              "rightValue": "LEADER",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -816,
+        -224
+      ],
+      "id": "f68f7313-bb06-4462-984e-8e6e53c6664a",
+      "name": "If: Is Leader?"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -656,
+        -320
+      ],
+      "id": "de934344-e9aa-41fc-9702-8c155739eb82",
+      "name": "Wait",
+      "webhookId": "9e4837e3-1e8b-4886-86d6-a65cde83bd43"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM tg_album_files \nWHERE media_group_id = $1 \nORDER BY created_at ASC;",
+        "options": {
+          "queryReplacement": "={{ $('Input Normalizer').first().json.media_group_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -448,
+        -320
+      ],
+      "id": "782c664d-a047-4960-aa1c-9ef65c1d974f",
+      "name": "DB: Get Album Files",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n    const dbItems = $input.all();\n    if (dbItems.length === 0) return [];\n\n    const originalData = $('Input Normalizer').first().json;\n\n    let finalRawText = \"\";\n    let allFiles = [];\n\n    for (const item of dbItems) {\n        const row = item.json;\n\n        if (row.caption && row.caption.trim() !== \"\") {\n            finalRawText = row.caption;\n        }\n\n        if (row.base64_data) {\n            try {\n                // Разбираем строку из БД\n                const parsedFiles = JSON.parse(row.base64_data);\n                \n                // ГАРАНТИЯ ПЛОСКОГО МАССИВА: Если это массив, добавляем его элементы\n                if (Array.isArray(parsedFiles)) {\n                    allFiles.push(...parsedFiles); \n                } else if (typeof parsedFiles === 'object') {\n                    // Если это просто один объект, добавляем его\n                    allFiles.push(parsedFiles);\n                }\n            } catch (e) {\n                // Игнорируем битый JSON\n            }\n        }\n    }\n\n    return [{\n        json: {\n            sender_id: originalData.sender_id,\n            channel: originalData.channel,\n            raw_text: finalRawText,\n            media_group_id: originalData.media_group_id,\n            files_base64: allFiles, // Теперь тут идеально ровный список объектов\n            has_attachments: true\n        }\n    }];\n\n} catch (error) {\n    throw new Error(`[Album Aggregator Error]: ${error.message}`);\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        -320
+      ],
+      "id": "8461e9c6-a27d-4a4c-b593-87a8ff9ab573",
+      "name": "Code: Aggregate Album"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "6XpWAqO8oYerU0XF",
+          "mode": "id",
+          "cachedResultUrl": "/workflow/6XpWAqO8oYerU0XF"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {
+          "waitForSubWorkflow": true
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        -32,
+        -96
+      ],
+      "id": "75ab077b-d5a7-4746-8693-1cdb9a368e92",
+      "name": "Call 'Worker: SDR Pipeline'"
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n    const items = $input.all();\n    const results = [];\n\n    for (let i = 0; i < items.length; i++) {\n        const item = items[i];\n        const json = item.json || {};\n        const webhookData = json.body || json; // Иногда вебхук прячет данные в body\n\n        // 1. OMNI-CHANNEL NORMALIZATION (УНИВЕРСАЛЬНЫЙ ПАРСЕР)\n        let senderId = \"unknown\";\n        let channel = \"unknown\";\n        let rawText = \"\";\n        let mediaGroupId = null; \n\n        // 🔵 СЦЕНАРИЙ А: TELEGRAM\n        if (webhookData.message && webhookData.message.chat) {\n            senderId = String(webhookData.message.chat.id);\n            channel = \"telegram\";\n            rawText = webhookData.message.text || webhookData.message.caption || \"\";\n            \n            if (webhookData.message.media_group_id) {\n                mediaGroupId = String(webhookData.message.media_group_id);\n            }\n        } \n        // 🔴 СЦЕНАРИЙ Б: EMAIL (Gmail / IMAP Trigger)\n        else if (webhookData.from && webhookData.from.value && Array.isArray(webhookData.from.value)) {\n            // Вытаскиваем email из массива (например: babardinio@proton.me)\n            senderId = String(webhookData.from.value[0].address);\n            channel = \"email\";\n            \n            // Вытаскиваем текст письма\n            rawText = webhookData.text || webhookData.textPlain || webhookData.snippet || \"\";\n            \n            // Микро-клининг: отрезаем стандартные подписи почтовиков\n            if (rawText.includes(\"Sent with Proton Mail\")) {\n                rawText = rawText.split(\"Sent with Proton Mail\")[0].trim();\n            }\n\n            // 🛑 НОВАЯ ВСТАВКА: ОЧИСТКА ОТ ИСТОРИИ ПЕРЕПИСКИ (ЗАГРЯЗНЕНИЯ КОНТЕКСТА)\n            // Обрезаем всё, что начинается с \"\\n\\n\" и дня недели (формат Gmail) или знака цитаты \">\"\n            rawText = rawText.split(/\\n\\n(?=(?:пн|вт|ср|чт|пт|сб|вс|On|Mon|Tue|Wed|Thu|Fri|Sat|Sun))/i)[0];\n            rawText = rawText.split(/(?:\\n>|\\n >)/)[0].trim();\n        } \n        // 🟣 СЦЕНАРИЙ В: Внутренний API / Кастомный формат\n        else if (webhookData.sender && webhookData.sender.contact_id) {\n            senderId = String(webhookData.sender.contact_id);\n            channel = webhookData.metadata?.source_channel || \"api\";\n            rawText = webhookData.payload?.raw_text || \"\";\n        }\n\n        // 2. БРОНЕБОЙНОЕ ИЗВЛЕЧЕНИЕ ФАЙЛА (Dual Fallback)\n        let encodedFiles = [];\n\n        if (item.binary) {\n            const keys = Object.keys(item.binary);\n            for (const key of keys) {\n                const binData = item.binary[key];\n                if (!binData) continue;\n\n                let base64String = \"\";\n\n                // ПОПЫТКА 1: Официальный API n8n\n                if (this.helpers && typeof this.helpers.getBinaryDataBuffer === 'function') {\n                    try {\n                        const buffer = await this.helpers.getBinaryDataBuffer(i, key);\n                        if (buffer) {\n                            base64String = buffer.toString('base64');\n                        }\n                    } catch (err) {}\n                }\n\n                // ПОПЫТКА 2: Прямое чтение\n                if (!base64String && binData.data) {\n                    base64String = binData.data;\n                }\n\n                // Сохраняем файл\n                if (base64String) {\n                    if (base64String.includes('base64,')) {\n                        base64String = base64String.split('base64,')[1];\n                    }\n\n                    encodedFiles.push({\n                        mime_type: binData.mimeType || \"application/octet-stream\",\n                        file_name: binData.fileName || `file_${key}`,\n                        base64: base64String\n                    });\n                }\n            }\n        }\n\n        // 3. ОТДАЕМ ИДЕАЛЬНЫЙ СТАНДАРТИЗИРОВАННЫЙ РЕЗУЛЬТАТ\n        results.push({\n            json: {\n                sender_id: senderId,\n                channel: channel,\n                raw_text: rawText,\n                media_group_id: mediaGroupId,\n                files_base64: encodedFiles\n            }\n        });\n    }\n\n    return results;\n\n} catch (error) {\n    const errorDetails = error && error.message ? error.message : String(error);\n    throw new Error(`[Input Normalizer Error]: Сбой парсинга. Детали: ${errorDetails}`);\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1216,
+        176
+      ],
+      "id": "55b2e362-5af1-4484-9b48-45c65df25aba",
+      "name": "Input Normalizer"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- 1. Фиксируем текущее сообщение\nINSERT INTO rate_limits (sender_id) VALUES ($1);\n\n-- 2. Считаем, сколько сообщений было за последнюю минуту\nSELECT COUNT(*) AS msg_count\nFROM rate_limits\nWHERE sender_id = $1 AND created_at >= NOW() - INTERVAL '1 minute';",
+        "options": {
+          "queryReplacement": "={{ $json.sender_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -1040,
+        176
+      ],
+      "id": "cf8b7138-d0c5-4882-854c-51f536046279",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1f6e6e08-b380-4196-b8d1-2291cf6ccb17",
+              "leftValue": "={{ parseInt($json.msg_count) }}",
+              "rightValue": 7,
+              "operator": {
+                "type": "number",
+                "operation": "lte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -880,
+        176
+      ],
+      "id": "39b6db72-c5f9-489e-98c7-8f34a24bd7a0",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "content": "# Customer verification and media file processing \n\n\n",
+        "height": 832,
+        "width": 1584
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1424,
+        -384
+      ],
+      "typeVersion": 1,
+      "id": "43b0310e-40fa-4319-befe-d0ff3d50c0ff",
+      "name": "Sticky Note"
+    }
+  ],
+  "pinData": {
+    "Email Trigger (IMAP)": [
+      {
+        "json": {
+          "headers": {
+            "delivered-to": "Delivered-To: jikoyibo@gmail.com",
+            "received": "Received: from mail-sor-f41.google.com (mail-sor-f41.google.com. [209.85.220.41])\r\n        by mx.google.com with SMTPS id a640c23a62f3a-ba454234dd0sor406205666b.17.2026.04.23.02.08.20\r\n        for <jikoyibo@gmail.com>\r\n        (Google Transport Security);\r\n        Thu, 23 Apr 2026 02:08:20 -0700 (PDT)",
+            "x-received": "X-Received: by 2002:a17:907:7247:b0:baa:1db1:ef9b with SMTP id\r\n a640c23a62f3a-baa1db1efb4mr531224066b.18.1776935299190; Thu, 23 Apr 2026\r\n 02:08:19 -0700 (PDT)",
+            "arc-seal": "ARC-Seal: i=1; a=rsa-sha256; t=1776935299; cv=none;\r\n        d=google.com; s=arc-20240605;\r\n        b=gV91VY9oTPCu6W9fJi+m7U7Bj10Epg2w+6Wrnh0SW3cWC1odxd3937TwpYsr7RiTlM\r\n         hUGluk+g3rWDzvDqRRgNqM8hCez13fyO8Vsp4kM3Oq1aXID1A2Hc+XGw22h7kNPpHUDq\r\n         jMMha8yTFHc29mA9vydMWxWfr3itiPKma8F1M8qTRfkWcY41iOPiJvZknKwlFRazWl/H\r\n         FR74seKrdpIcaZoAhQTXBq2r2XCjnVa+KsF0+AHv3D5fn13WsYk+ktIkRpEijbxOnWqa\r\n         Zrq9fNBxzGA9VjC1oZstsIRBPQOk3s+Z/BqMX51l44M/RgJU5FE8PqNOuh72o9plokyU\r\n         9pdw==",
+            "arc-message-signature": "ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20240605;\r\n        h=to:subject:message-id:date:from:in-reply-to:references:mime-version\r\n         :dkim-signature;\r\n        bh=YFVsjlUritB0MyBqxEFQ1vqeDXqtP3DCkZ2tvbRtBi4=;\r\n        fh=/Xr+nxnklCz6pTOlks4GGiu92QpP/54KDndQ1LiAquY=;\r\n        b=aOscMlJqrey+aasz24Aew7V7AjBqg1cjlt2PWvX+wZ11J4poG+Jlj2N/9ohoEVv67Q\r\n         neYekTMQ991IQsPPSu0gQlBBUH9dyBOFd+CJvjOjx0qVWSyRM7G6WG/1PRCSVSrWYaFs\r\n         4KvqHjZ2Qarm3LZqXuJpGNf/jPz/eD2LcKHwHABQFrdH62RaPBnXKmKUd4Es0JQwe8sb\r\n         1HVUY5f4mVqfmxnsrBfNB9rZhR0ETVAN4ysrcrrdf8Hr8/fEz1jEWtOaAsl3BU3+0eTA\r\n         k3aYizCQwQWT8gRu4CRTZDEYzBmtJ60cnhPMTkZjLynFdCcwQzLCKc0j8hkei6iEmESu\r\n         7Ytg==;\r\n        dara=google.com",
+            "arc-authentication-results": "ARC-Authentication-Results: i=1; mx.google.com; arc=none",
+            "return-path": "Return-Path: <akulovil368@gmail.com>",
+            "received-spf": "Received-SPF: pass (google.com: domain of akulovil368@gmail.com designates 209.85.220.41 as permitted sender) client-ip=209.85.220.41;",
+            "authentication-results": "Authentication-Results: mx.google.com;\r\n       dkim=pass header.i=@gmail.com header.s=20251104 header.b=\"W/t9lSq6\";\r\n       arc=pass (i=1);\r\n       spf=pass (google.com: domain of akulovil368@gmail.com designates 209.85.220.41 as permitted sender) smtp.mailfrom=akulovil368@gmail.com;\r\n       dmarc=pass (p=NONE sp=QUARANTINE dis=NONE) header.from=gmail.com;\r\n       dara=pass header.i=@gmail.com",
+            "dkim-signature": "DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;\r\n        d=gmail.com; s=20251104; t=1776935299; x=1777540099; dara=google.com;\r\n        h=to:subject:message-id:date:from:in-reply-to:references:mime-version\r\n         :from:to:cc:subject:date:message-id:reply-to;\r\n        bh=YFVsjlUritB0MyBqxEFQ1vqeDXqtP3DCkZ2tvbRtBi4=;\r\n        b=W/t9lSq6MIUNRu+FQzEGJhVPCnmb5JqBAajiiJ3D81O7+9fdDHB+gvlc21jfV3OngD\r\n         D+Oz4SiEAIYiu8eS3jii3Ty11Gh13rMXs2QFdOvP9GzuLnb1sApT1NpnBg29vUiR7Ixb\r\n         FJkWVa270X+eK9gfzS+c75eMxAF59IzY63sn6+kUB4Vfw+Kqxme07mah8diMvJ76wBd+\r\n         iAxWGs72bOxIyIir8gjXHV2oy3fGWSEHO3wimLFQzinPodA3AhidlLZ0DqFyPBr/tq/e\r\n         wweODiulvXZfMU59Daub2+gHFD0X7ojpXW64iwJRPeeduHBSNec05IPbp4CDevT7Mv/Z\r\n         iI3g==",
+            "x-google-dkim-signature": "X-Google-DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed;\r\n        d=1e100.net; s=20251104; t=1776935299; x=1777540099;\r\n        h=to:subject:message-id:date:from:in-reply-to:references:mime-version\r\n         :x-gm-gg:x-gm-message-state:from:to:cc:subject:date:message-id\r\n         :reply-to;\r\n        bh=YFVsjlUritB0MyBqxEFQ1vqeDXqtP3DCkZ2tvbRtBi4=;\r\n        b=VeaPDi5bQ03ZQh8cFurSaZCeHQLU6OPZtINL8QIlnf1Z/v4jMBR+Gg6+8rnFR0bQlq\r\n         qkH7P//gWyoalSCuerqTi3pY3uhV29f9JSsYg1XAYwCxWM0WozL9L3CRuJ+Hg8Ueu7XR\r\n         qdQMO4Um++OPKzSKuBpz/xp7w09fCZqgOGYJZipYlGRlA/szRaHW+z31LRNIKsClk9lV\r\n         mAqeNLIguMdbgah1Xm5u+bClrdpcOy5zkfsLVVkIbWXSayS9+yvvOBV5Oy2jD2DfJavD\r\n         2b303C4HZREf3TdV3HJmxW/UqC7l/ZdzNiUtTzfJjIHXJGx5m8ROGC3aEDfkKjIYT3iL\r\n         1o7A==",
+            "x-gm-message-state": "X-Gm-Message-State: AOJu0YwIsTEOxThQdn3LPUadh057DEItEihHkVYh1bLRrPdyNaBdODt0\r\n\tlyk/SRrSXTOczo83WEQt3ocQg9I0wEy97mlUqiT9l/vZT8mAFV62nmXquGwwOyGhLneSC97MfnN\r\n\tNdiu4eDc1fLM8Rs20DgWSJW/S8zl+OOoO9bEX",
+            "x-gm-gg": "X-Gm-Gg: AeBDietZQTOv2XPu33NZLoZLOSFNNd/esXHSfyp8SXZ70WrRlbztayH8pMXOVn1TWWL\r\n\tyRR0E9vbb0sC/GXIiGfUD235S2gun6oClCkXEP1L1J8PODpcosygKH89Zc22fwwkOYaBiiSLtyW\r\n\tJuXak6uS+Vu1k7tGPR/yQzgpx/zGumNAiV+1nq3B1mmiXqJEeRERbhaG/RIKi0jXNEsFlpLyZhg\r\n\tnl1tDSXAtGB2URfva6jK3lAQYRCfdXnjFHQ713016+hq+yXBHQMn0Tn6Qi6fjrsoOJyHanZC4rD\r\n\tgtD17OPlkMOIfcogwC6wz/bIZxG7v20RhtpP5uExMZmej7G+eg==",
+            "mime-version": "MIME-Version: 1.0",
+            "references": "References: <CAPCv9TxmTksO6UJtzF-Zxk=N8N8acNNy+-p0LefyZu2PCYvBZA@mail.gmail.com>",
+            "in-reply-to": "In-Reply-To: <CAPCv9TxmTksO6UJtzF-Zxk=N8N8acNNy+-p0LefyZu2PCYvBZA@mail.gmail.com>",
+            "from": "From: Ilya Bard <akulovil368@gmail.com>",
+            "date": "Date: Thu, 23 Apr 2026 12:08:07 +0300",
+            "x-gm-features": "X-Gm-Features: AQROBzDCJ0lrPrfiO1_lDTWx-HbaL_DGaP3krkFkOw-DPkOdYBNW8Fs53FTv8lU",
+            "message-id": "Message-ID: <CAPH2QeJiV5Tv1vZGPokih7GsL6=9_LmCmBJQbGOQsvrDAMShdQ@mail.gmail.com>",
+            "subject": "Subject: =?UTF-8?B?UmU6INCe0LHRgdGD0LbQtNC10L3QuNC1?=",
+            "to": "To: jikoyibo@gmail.com",
+            "content-type": "Content-Type: multipart/alternative; boundary=\"0000000000004c112306501cfd64\""
+          },
+          "html": "<div dir=\"ltr\">Завтра на 10</div><br><div class=\"gmail_quote gmail_quote_container\"><div dir=\"ltr\" class=\"gmail_attr\">чт, 23 апр. 2026 г. в 12:07, &lt;<a href=\"mailto:jikoyibo@gmail.com\">jikoyibo@gmail.com</a>&gt;:<br></div><blockquote class=\"gmail_quote\" style=\"margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex\">Вижу, вы уже в курсе цифр. Да, 75–100 часов в месяц — это только консультации. Онбординг и рутина сверху. \n\nСмотрите, суть простая: наш ИИ забирает на себя первичные консультации и типовые вопросы, которые отнимают 40–60% времени ваших консультантов. Это не про замену людей — это про то, чтобы они занимались сложными кейсами, а не повторяли одно и то же в 148-й раз.\n\nДавайте покажу на цифрах вживую. Когда удобно созвониться на 20–30 минут?\nСвободные слоты на ближайшие дни:\n\n**Сегодня (23 апреля)** — 12:30–18:00 (есть окна)\n**Завтра (24 апреля)** — 10:00–11:00, 12:00–14:00, 16:00–18:00\n**Пятница (25 апреля)** — 10:00–11:00, 12:00–18:00\n\nВам удобнее сегодня на 14:00 или завтра на 10:00?/\n</blockquote></div>\n",
+          "text": "Завтра на 10\n\nчт, 23 апр. 2026 г. в 12:07, <jikoyibo@gmail.com>:\n\n> Вижу, вы уже в курсе цифр. Да, 75–100 часов в месяц — это только\n> консультации. Онбординг и рутина сверху. Смотрите, суть простая: наш ИИ\n> забирает на себя первичные консультации и типовые вопросы, которые отнимают\n> 40–60% времени ваших консультантов. Это не про замену людей — это про то,\n> чтобы они занимались сложными кейсами, а не повторяли одно и то же в 148-й\n> раз. Давайте покажу на цифрах вживую. Когда удобно созвониться на 20–30\n> минут? Свободные слоты на ближайшие дни: **Сегодня (23 апреля)** —\n> 12:30–18:00 (есть окна) **Завтра (24 апреля)** — 10:00–11:00, 12:00–14:00,\n> 16:00–18:00 **Пятница (25 апреля)** — 10:00–11:00, 12:00–18:00 Вам удобнее\n> сегодня на 14:00 или завтра на 10:00?/\n",
+          "textAsHtml": "<p>&Zcy;&acy;&vcy;&tcy;&rcy;&acy; &ncy;&acy; 10</p><p>&chcy;&tcy;, 23 &acy;&pcy;&rcy;. 2026&#x202F;&gcy;. &vcy; 12:07, &lt;<a href=\"mailto:jikoyibo@gmail.com\">jikoyibo@gmail.com</a>&gt;:</p><p>&gt; &Vcy;&icy;&zhcy;&ucy;, &vcy;&ycy; &ucy;&zhcy;&iecy; &vcy; &kcy;&ucy;&rcy;&scy;&iecy; &tscy;&icy;&fcy;&rcy;. &Dcy;&acy;, 75&ndash;100 &chcy;&acy;&scy;&ocy;&vcy; &vcy; &mcy;&iecy;&scy;&yacy;&tscy; &mdash; &ecy;&tcy;&ocy; &tcy;&ocy;&lcy;&softcy;&kcy;&ocy;<br/>&gt; &kcy;&ocy;&ncy;&scy;&ucy;&lcy;&softcy;&tcy;&acy;&tscy;&icy;&icy;. &Ocy;&ncy;&bcy;&ocy;&rcy;&dcy;&icy;&ncy;&gcy; &icy; &rcy;&ucy;&tcy;&icy;&ncy;&acy; &scy;&vcy;&iecy;&rcy;&khcy;&ucy;. &Scy;&mcy;&ocy;&tcy;&rcy;&icy;&tcy;&iecy;, &scy;&ucy;&tcy;&softcy; &pcy;&rcy;&ocy;&scy;&tcy;&acy;&yacy;: &ncy;&acy;&shcy; &Icy;&Icy;<br/>&gt; &zcy;&acy;&bcy;&icy;&rcy;&acy;&iecy;&tcy; &ncy;&acy; &scy;&iecy;&bcy;&yacy; &pcy;&iecy;&rcy;&vcy;&icy;&chcy;&ncy;&ycy;&iecy; &kcy;&ocy;&ncy;&scy;&ucy;&lcy;&softcy;&tcy;&acy;&tscy;&icy;&icy; &icy; &tcy;&icy;&pcy;&ocy;&vcy;&ycy;&iecy; &vcy;&ocy;&pcy;&rcy;&ocy;&scy;&ycy;, &kcy;&ocy;&tcy;&ocy;&rcy;&ycy;&iecy; &ocy;&tcy;&ncy;&icy;&mcy;&acy;&yucy;&tcy;<br/>&gt; 40&ndash;60% &vcy;&rcy;&iecy;&mcy;&iecy;&ncy;&icy; &vcy;&acy;&shcy;&icy;&khcy; &kcy;&ocy;&ncy;&scy;&ucy;&lcy;&softcy;&tcy;&acy;&ncy;&tcy;&ocy;&vcy;. &Ecy;&tcy;&ocy; &ncy;&iecy; &pcy;&rcy;&ocy; &zcy;&acy;&mcy;&iecy;&ncy;&ucy; &lcy;&yucy;&dcy;&iecy;&jcy; &mdash; &ecy;&tcy;&ocy; &pcy;&rcy;&ocy; &tcy;&ocy;,<br/>&gt; &chcy;&tcy;&ocy;&bcy;&ycy; &ocy;&ncy;&icy; &zcy;&acy;&ncy;&icy;&mcy;&acy;&lcy;&icy;&scy;&softcy; &scy;&lcy;&ocy;&zhcy;&ncy;&ycy;&mcy;&icy; &kcy;&iecy;&jcy;&scy;&acy;&mcy;&icy;, &acy; &ncy;&iecy; &pcy;&ocy;&vcy;&tcy;&ocy;&rcy;&yacy;&lcy;&icy; &ocy;&dcy;&ncy;&ocy; &icy; &tcy;&ocy; &zhcy;&iecy; &vcy; 148-&jcy;<br/>&gt; &rcy;&acy;&zcy;. &Dcy;&acy;&vcy;&acy;&jcy;&tcy;&iecy; &pcy;&ocy;&kcy;&acy;&zhcy;&ucy; &ncy;&acy; &tscy;&icy;&fcy;&rcy;&acy;&khcy; &vcy;&zhcy;&icy;&vcy;&ucy;&yucy;. &Kcy;&ocy;&gcy;&dcy;&acy; &ucy;&dcy;&ocy;&bcy;&ncy;&ocy; &scy;&ocy;&zcy;&vcy;&ocy;&ncy;&icy;&tcy;&softcy;&scy;&yacy; &ncy;&acy; 20&ndash;30<br/>&gt; &mcy;&icy;&ncy;&ucy;&tcy;? &Scy;&vcy;&ocy;&bcy;&ocy;&dcy;&ncy;&ycy;&iecy; &scy;&lcy;&ocy;&tcy;&ycy; &ncy;&acy; &bcy;&lcy;&icy;&zhcy;&acy;&jcy;&shcy;&icy;&iecy; &dcy;&ncy;&icy;: **&Scy;&iecy;&gcy;&ocy;&dcy;&ncy;&yacy; (23 &acy;&pcy;&rcy;&iecy;&lcy;&yacy;)** &mdash;<br/>&gt; 12:30&ndash;18:00 (&iecy;&scy;&tcy;&softcy; &ocy;&kcy;&ncy;&acy;) **&Zcy;&acy;&vcy;&tcy;&rcy;&acy; (24 &acy;&pcy;&rcy;&iecy;&lcy;&yacy;)** &mdash; 10:00&ndash;11:00, 12:00&ndash;14:00,<br/>&gt; 16:00&ndash;18:00 **&Pcy;&yacy;&tcy;&ncy;&icy;&tscy;&acy; (25 &acy;&pcy;&rcy;&iecy;&lcy;&yacy;)** &mdash; 10:00&ndash;11:00, 12:00&ndash;18:00 &Vcy;&acy;&mcy; &ucy;&dcy;&ocy;&bcy;&ncy;&iecy;&iecy;<br/>&gt; &scy;&iecy;&gcy;&ocy;&dcy;&ncy;&yacy; &ncy;&acy; 14:00 &icy;&lcy;&icy; &zcy;&acy;&vcy;&tcy;&rcy;&acy; &ncy;&acy; 10:00?/</p>",
+          "subject": "Re: Обсуждение",
+          "references": "<CAPCv9TxmTksO6UJtzF-Zxk=N8N8acNNy+-p0LefyZu2PCYvBZA@mail.gmail.com>",
+          "date": "2026-04-23T09:08:07.000Z",
+          "to": {
+            "value": [
+              {
+                "address": "jikoyibo@gmail.com",
+                "name": ""
+              }
+            ],
+            "html": "<span class=\"mp_address_group\"><a href=\"mailto:jikoyibo@gmail.com\" class=\"mp_address_email\">jikoyibo@gmail.com</a></span>",
+            "text": "jikoyibo@gmail.com"
+          },
+          "from": {
+            "value": [
+              {
+                "address": "akulovil368@gmail.com",
+                "name": "Ilya Bard"
+              }
+            ],
+            "html": "<span class=\"mp_address_group\"><span class=\"mp_address_name\">Ilya Bard</span> &lt;<a href=\"mailto:akulovil368@gmail.com\" class=\"mp_address_email\">akulovil368@gmail.com</a>&gt;</span>",
+            "text": "\"Ilya Bard\" <akulovil368@gmail.com>"
+          },
+          "messageId": "<CAPH2QeJiV5Tv1vZGPokih7GsL6=9_LmCmBJQbGOQsvrDAMShdQ@mail.gmail.com>",
+          "inReplyTo": "<CAPCv9TxmTksO6UJtzF-Zxk=N8N8acNNy+-p0LefyZu2PCYvBZA@mail.gmail.com>",
+          "attributes": {
+            "uid": 3889
+          }
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Email Trigger (IMAP)": {
+      "main": [
+        [
+          {
+            "node": "Input Normalizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Input Normalizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Call 'Worker: SDR Pipeline'",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Call 'Worker: Support Pipeline'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If: Is Album?": {
+      "main": [
+        [
+          {
+            "node": "DB: Save Album File",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB: Save Album File": {
+      "main": [
+        [
+          {
+            "node": "DB: Elect Leader",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB: Elect Leader": {
+      "main": [
+        [
+          {
+            "node": "If: Is Leader?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If: Is Leader?": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "DB: Get Album Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB: Get Album Files": {
+      "main": [
+        [
+          {
+            "node": "Code: Aggregate Album",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code: Aggregate Album": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input Normalizer": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query1": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "If: Is Album?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "versionId": "4427ff74-6a3e-4d51-b2fe-23c334d255dd",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "761636f69334fbc63ec2ca98d666fc91250da19cdf07f79e76145e4f4546c080"
+  },
+  "id": "fLxz0QDSbKLj675Y",
+  "tags": []
+}

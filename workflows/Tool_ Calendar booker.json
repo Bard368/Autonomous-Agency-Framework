@@ -1,0 +1,320 @@
+{
+  "name": "Tool: Calendar booker",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "book-calendar",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "e217830f-21dd-4e79-9338-b3db7af40755",
+      "name": "Webhook",
+      "webhookId": "df7a83e9-ffa6-4d30-accf-2e8b459c956b"
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "={{ $json.calendar_id }}",
+          "mode": "id"
+        },
+        "start": "={{ $json.start_time }}",
+        "end": "={{ $json.end_time }}",
+        "additionalFields": {
+          "attendees": [],
+          "conferenceDataUi": {
+            "conferenceDataValues": {
+              "conferenceSolution": "hangoutsMeet"
+            }
+          },
+          "description": "={{ $node[\"Code in JavaScript\"].json[\"contact_id\"] }}",
+          "summary": "={{ $json.event_title }}"
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [
+        416,
+        0
+      ],
+      "id": "87615a22-4191-43bb-b72b-4688683818bb",
+      "name": "Create an event",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "u0Oj0lLN5kKbF7MU",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n    const body = $input.item.json.body || {};\n    \n    // 1. ПОЧТА КАЛЕНДАРЯ\n    const targetCalendarEmail = \"andcoestate@gmail.com\"; \n\n    // 2. ИЗВЛЕКАЕМ ID (Поддерживает и TG ID, и Email)\n    let rawId = body.system_client_identifier || body.contact_id || body.client_email || \"\";\n    \n    // Вырезаем фигурные скобки, если Dify прислал {{contact_id}} или {{email@mail.com}}\n    let cleanContactId = String(rawId).replace(/[{}]/g, '').trim();\n\n    // ПРЕДОХРАНИТЕЛЬ: Если Dify прислал тупо текст \"contact_id\" вместо значения\n    if (cleanContactId === \"contact_id\" || cleanContactId === \"\") {\n        throw new Error(`Dify не подставил переменную! В вебхук пришло: ${rawId}`);\n    }\n\n    // 3. ПРОВЕРКА ВРЕМЕНИ\n    const startTime = body.start_time;\n    const endTime = body.end_time;\n\n    if (!startTime || !endTime) {\n        throw new Error(`Dify обрезал время встречи! Данные вебхука: ${JSON.stringify(body)}`);\n    }\n\n    // 4. ДАННЫЕ О КЛИЕНТЕ\n    const title = body.event_title || \"Discovery Call\";\n    const pains = body.client_pain_points || \"Не указано\";\n    const brief = body.company_brief || \"Не указано\";\n\n    // 5. ОТДАЕМ ЧИСТЫЙ РЕЗУЛЬТАТ\n    return {\n        json: {\n            calendar_id: targetCalendarEmail,\n            contact_id: cleanContactId, // Тут будет \"123456\" ИЛИ \"client@mail.com\"\n            start_time: startTime,\n            end_time: endTime,\n            event_title: title,\n            client_pain_points: pains,\n            company_brief: brief\n        }\n    };\n\n} catch (error) {\n    throw new Error(error.message);\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        208,
+        0
+      ],
+      "id": "9917b7f7-a744-48d3-9d70-cffcd8ccb467",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "jsCode": "try {\n    const eventData = $(\"Create an event\").first().json || {};\n\n    let dbData = {};\n    try {\n        dbData = $(\"Execute a SQL query\").first().json || {};\n    } catch (e) {}\n    \n    const preData = $(\"Code in JavaScript\").first().json || {};\n\n    const meetLink = eventData.hangoutLink || \"Ссылка будет в приглашении\";\n\n    if (eventData.id) {\n        return {\n            json: {\n                status: \"success\",\n                message: `Встреча создана. Ссылка на Meet: ${meetLink}.`,\n                \n                tg_report: {\n                    meet_url: meetLink,\n                    contact: preData.contact_id, // TG ID или Email\n                    company_info: preData.company_brief, // Бриф о компании!\n                    niche: dbData.company_niche || \"Не найдено в БД\",\n                    \n                    // Берем свежие боли от ИИ, если нет - из базы\n                    pains: (preData.client_pain_points && preData.client_pain_points !== \"Не указано\") \n                           ? preData.client_pain_points \n                           : (dbData.ai_pain_point || \"Не найдено в БД\"),\n                           \n                    pitch: dbData.custom_pitch || \"Не найдено в БД\",\n                    time: eventData.start?.dateTime || preData.start_time,\n                    title: eventData.summary || preData.event_title || \"Discovery Call\"\n                }\n            }\n        };\n    } else {\n        return { json: { status: \"error\", message: \"Критическая ошибка Google Calendar.\" } };\n    }\n} catch (error) {\n    return { json: { status: \"error\", message: \"Ошибка отчета: \" + error.message } };\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        0
+      ],
+      "id": "4ae83f5a-25f8-4a90-a025-a65dfa6a9b8b",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "chatId": "-1003504845179",
+        "text": "=🚀 <b>НОВАЯ ВСТРЕЧА ЗАБРОНИРОВАНА</b>\n\n📅 <b>Дата:</b> {{ new Date($('Code in JavaScript1').item.json.tg_report.time).toLocaleString('ru-RU', { timeZone: 'Europe/Kyiv', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) }}\n\n👤 <b>Клиент:</b> {{ $('Code in JavaScript1').item.json.tg_report.title }}\n\n\n🎯 <b>БОЛИ КЛИЕНТА:</b>\n{{ $('Code in JavaScript1').item.json.tg_report.pains }}\n\n🏢 <b>О КОМПАНИИ:</b>\n{{ $('Execute a SQL query').item.json.company_niche }}\n\n🔗 <b>ССЫЛКА НА СОЗВОН (Google Meet):</b>\n{{ $node[\"Create an event\"].json[\"hangoutLink\"] }}\n\n💼 <b>Открыть сделку (Kommo):</b> https://akulovaef.kommo.com/leads/detail/{{ $(\"Execute a SQL query\").first().json.crm_deal_id }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1520,
+        0
+      ],
+      "id": "97f8bfdc-5653-4e01-9440-f0103419bda9",
+      "name": "Send a text message",
+      "webhookId": "2224afa7-abd8-4889-b040-5eda5f5a0929",
+      "credentials": {
+        "telegramApi": {
+          "id": "YskME959crtIWSje",
+          "name": "Бот Клиент"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT ai_pain_point, company_niche, custom_pitch, crm_deal_id \nFROM leads_pipeline \nWHERE contact_id = '{{ $('Code in JavaScript').item.json.contact_id }}' \nORDER BY id DESC \nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        624,
+        0
+      ],
+      "id": "10079fce-775c-4583-bf19-d82626511367",
+      "name": "Execute a SQL query",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "NnrwY1A82Y84PnLS",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "https://akulovaef.kommo.com/api/v4/leads",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": []
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImp0aSI6IjY4MGE5YjczZTNjNzg5N2M5NzZhMDdkMmQ3NmI0MjNjOWZjMTYyYTAwM2I2ZWU5ZWVlNzU2Nzk5MzM3YzdhY2ViMDU0ZTRiNmI0OGUxYzRjIn0.eyJhdWQiOiIxMDU3NzgzOC02Y2E5LTQyM2QtYmRmNy1hZjc3ODUzYjM1N2UiLCJqdGkiOiI2ODBhOWI3M2UzYzc4OTdjOTc2YTA3ZDJkNzZiNDIzYzlmYzE2MmEwMDNiNmVlOWVlZTc1Njc5OTMzN2M3YWNlYjA1NGU0YjZiNDhlMWM0YyIsImlhdCI6MTc3NjM3MDY1NCwibmJmIjoxNzc2MzcwNjU0LCJleHAiOjE3OTk0NTI4MDAsInN1YiI6IjE1MTIwNDM1IiwiZ3JhbnRfdHlwZSI6IiIsImFjY291bnRfaWQiOjM2MzQ4NDgzLCJiYXNlX2RvbWFpbiI6ImtvbW1vLmNvbSIsInZlcnNpb24iOjIsInNjb3BlcyI6WyJwdXNoX25vdGlmaWNhdGlvbnMiLCJmaWxlcyIsImNybSIsImZpbGVzX2RlbGV0ZSIsIm5vdGlmaWNhdGlvbnMiXSwiaGFzaF91dWlkIjoiZmZiMzMyYTMtMmJkZS00YTQyLWIyMzYtOWMzMzEzZDAzN2UyIiwiYXBpX2RvbWFpbiI6ImFwaS1jLmtvbW1vLmNvbSJ9.ABSyY1oJwgO_-znjKAuLpE7bYkFqHa0up0dQnXfBgIrJcOkms771j3CeC0oltQ6iRUaDJvSXnY8hjAapquVMTg-HhTC9AHFfS43vkU1l6tkGgdeOaHxVYl-iI8rg9ZtGnhep6tY-5IaT7r2Q0_AkdoTHBg9LXmqsW2zNmm8jqufYv7pZyQ6A56jtszR-HkeVjd54BBQYQ9CcMEQbWRj-CSSQGsCcSLEMW8CxUapf5S_AtukeSxrZREpEHnqdcRInFHJDUzHybFd6yPM7gopCenWWsp3aA0BNpB4Mb2-3PewAx3cxIItNuxzSorlD-8qsFw_saIZQPis4qViWuHHEZQ"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "=[\n\n  {\n\n    \"id\": {{ $(\"Execute a SQL query\").first().json.crm_deal_id }},\n\n    \"status_id\": 104588363 \n\n  }\n\n]",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "297dcee9-1c0e-499b-88d4-e01a36100da0",
+      "name": "Change pipeline",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://akulovaef.kommo.com/api/v4/tasks",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImp0aSI6IjY4MGE5YjczZTNjNzg5N2M5NzZhMDdkMmQ3NmI0MjNjOWZjMTYyYTAwM2I2ZWU5ZWVlNzU2Nzk5MzM3YzdhY2ViMDU0ZTRiNmI0OGUxYzRjIn0.eyJhdWQiOiIxMDU3NzgzOC02Y2E5LTQyM2QtYmRmNy1hZjc3ODUzYjM1N2UiLCJqdGkiOiI2ODBhOWI3M2UzYzc4OTdjOTc2YTA3ZDJkNzZiNDIzYzlmYzE2MmEwMDNiNmVlOWVlZTc1Njc5OTMzN2M3YWNlYjA1NGU0YjZiNDhlMWM0YyIsImlhdCI6MTc3NjM3MDY1NCwibmJmIjoxNzc2MzcwNjU0LCJleHAiOjE3OTk0NTI4MDAsInN1YiI6IjE1MTIwNDM1IiwiZ3JhbnRfdHlwZSI6IiIsImFjY291bnRfaWQiOjM2MzQ4NDgzLCJiYXNlX2RvbWFpbiI6ImtvbW1vLmNvbSIsInZlcnNpb24iOjIsInNjb3BlcyI6WyJwdXNoX25vdGlmaWNhdGlvbnMiLCJmaWxlcyIsImNybSIsImZpbGVzX2RlbGV0ZSIsIm5vdGlmaWNhdGlvbnMiXSwiaGFzaF91dWlkIjoiZmZiMzMyYTMtMmJkZS00YTQyLWIyMzYtOWMzMzEzZDAzN2UyIiwiYXBpX2RvbWFpbiI6ImFwaS1jLmtvbW1vLmNvbSJ9.ABSyY1oJwgO_-znjKAuLpE7bYkFqHa0up0dQnXfBgIrJcOkms771j3CeC0oltQ6iRUaDJvSXnY8hjAapquVMTg-HhTC9AHFfS43vkU1l6tkGgdeOaHxVYl-iI8rg9ZtGnhep6tY-5IaT7r2Q0_AkdoTHBg9LXmqsW2zNmm8jqufYv7pZyQ6A56jtszR-HkeVjd54BBQYQ9CcMEQbWRj-CSSQGsCcSLEMW8CxUapf5S_AtukeSxrZREpEHnqdcRInFHJDUzHybFd6yPM7gopCenWWsp3aA0BNpB4Mb2-3PewAx3cxIItNuxzSorlD-8qsFw_saIZQPis4qViWuHHEZQ"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  [\n    {\n      \"entity_id\": Number($(\"Execute a SQL query\").first().json.crm_deal_id),\n      \"entity_type\": \"leads\",\n      \"task_type_id\": 2, \n      \"text\": \"🚀 ПРОВЕСТИ СОЗВОН (Discovery Call)\\n\\n🔗 Ссылка: \" + $('Code in JavaScript1').item.json.tg_report.meet_url + \"\\n🎯 Боли: \" + $('Code in JavaScript1').item.json.tg_report.pains + \"\\n🏢 Ниша: \" + $('Code in JavaScript1').item.json.tg_report.niche,\n      \"complete_till\": Math.floor(new Date($('Code in JavaScript1').item.json.tg_report.time).getTime() / 1000)\n    }\n  ]\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [
+        1280,
+        0
+      ],
+      "id": "0bd8b9bd-7ddc-46b8-98b1-63a8e2d4423b",
+      "name": "Make Task",
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n.akulov.lol",
+            "user-agent": "python-httpx/0.28.1",
+            "content-length": "293",
+            "accept": "*/*",
+            "accept-encoding": "gzip, deflate, br, zstd",
+            "content-type": "application/json",
+            "traceparent": "00-8963367b5e2ea69cebcf41c31368c0de-a7d56ad922fb9321-00",
+            "x-b3-sampled": "0",
+            "x-b3-spanid": "a7d56ad922fb9321",
+            "x-b3-traceid": "8963367b5e2ea69cebcf41c31368c0de",
+            "x-forwarded-for": "3.214.24.53",
+            "x-forwarded-host": "n8n.akulov.lol",
+            "x-forwarded-port": "443",
+            "x-forwarded-proto": "https",
+            "x-forwarded-server": "c961e9c99a58",
+            "x-real-ip": "3.214.24.53"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "start_time": "2026-04-24T16:00:00+03:00",
+            "end_time": "2026-04-24T16:30:00+03:00",
+            "event_title": "Discovery Call: Маркетинговая команда",
+            "system_client_identifier": "akulovil368@gmail.com"
+          },
+          "webhookUrl": "https://n8n.akulov.lol/webhook/book-calendar",
+          "executionMode": "production"
+        },
+        "pairedItem": {
+          "item": 0
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Create an event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create an event": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Change pipeline",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Change pipeline": {
+      "main": [
+        [
+          {
+            "node": "Make Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Make Task": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "ddff8ccd-9b16-4ea8-84ae-0a855f71e8c0",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "761636f69334fbc63ec2ca98d666fc91250da19cdf07f79e76145e4f4546c080"
+  },
+  "id": "wKYyoL9G3Cz4nAAK",
+  "tags": []
+}

@@ -1,0 +1,37 @@
+openapi: 3.1.0
+info:
+  title: Emergency Kill Switch
+  version: 1.0.0
+servers:
+  - url: https://n8n.akulov.lol
+
+# 👇 1. ОПИСЫВАЕМ СХЕМУ БЕЗОПАСНОСТИ
+components:
+  securitySchemes:
+    KillSwitchAuth:
+      type: apiKey
+      in: header
+      name: X-Emergency-Secret # Имя заголовка, которое будет ждать n8n
+
+# 👇 2. ПРИМЕНЯЕМ ЕЁ КО ВСЕМУ ИНСТРУМЕНТУ
+security:
+  - KillSwitchAuth: []
+
+paths:
+  /webhook/kill-switch:
+    post:
+      summary: Экстренно останавливает все автоматизации клиента при критических сбоях или спаме.
+      operationId: emergencyStop
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                contact_id:
+                  type: string
+                  description: ID контакта клиента, запрашивающего остановку.
+      responses:
+        '200':
+          description: Успешная остановка систем

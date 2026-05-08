@@ -53,35 +53,35 @@
 ![Support Escalation](./images/support_escalation.png)
 *На скриншоті: SLA & Escalation Protocol — категоризація інцидентів із миттєвим створенням карток у Trello та автоматичним автодозвоном інженеру через Twilio.*
 
----
+### 4. Interactive Events (Callback Router)
 
-## 🤖 Інфраструктура ШІ-Агентів (Dify)
+![Caqllback](./images/callback.png)
+A dedicated microservice for handling asynchronous events from messengers (button clicks, replies, and commands). 
+* **Feature:** Processes the `/release` command from the engineering team's closed chat, parsing infrastructure credentials and securely saving them to the database for future TAM agent access.
 
-Система відходить від жорстко закодованих скриптів на користь LLM-агентів. Агенти обмежені суворим "Anti-Robot Protocol" (заборона на вибачення, суворо B2B ToV) і використовують зовнішні інструменти (Tools).
-
-### Розгорнуті ролі:
-* **Senior B2B SDR:** Проводить кваліфікацію за методологією N.S.S., виявляє бізнес-болі та оцінює втрати часу/бюджету ліда. Завершує діалог автоматичним призначенням відеозустрічі.
-* **Technical Account Manager (TAM):** Здійснює підтримку діючих клієнтів. Навчений самостійно видавати доступи до інфраструктури без участі інженерів.
-
-### Кастомні інструменти агентів (Dify Tools):
-ШІ може автономно викликати внутрішні мікросервіси через API:
-1. **Calendar Booker:** Перевіряє Google Календар менеджерів і створює Zoom-зустрічі.
-2. **Context Enrichment (RAG SQL):** Виконує безпечний RAG-запит у PostgreSQL для отримання конфіденційних інструкцій та паролів конкретного клієнта.
-3. **Emergency Stop (Kill Switch):** Якщо клієнт вимагає екстреної зупинки, ШІ знаходить ID збійного воркфлоу в базі даних і примусово гасить процес.
 
 ---
 
-## 📈 Метрики та Бізнес-імпакт
-1. **Zero-Touch Resolution:** До 70% технічних запитів закривається автономно (видача доступів, FAQ).
-2. **Миттєвий SLA:** Час від фіксації критичного бага до дзвінка черговому інженеру — `< 10 секунд`.
-3. **Безпечний Continuous Delivery:** Автоматизований збір даних під час релізу проєкту інженерами (через команду `/release`), що повністю виключає втрату клієнтських логінів та паролів.
+## 🗄️ Архітектура Бази Даних (Neon Serverless)
+Фреймворк спирається на реляційну модель даних із суворим управлінням станами. Нижче наведено спрощену ER-діаграму основних таблиць:
 
----
-
-## 🛠 Розгортання (Deployment)
-
-1. Клонуйте репозиторій.
-2. Налаштуйте змінні оточення на основі `.env.example` (API-ключі не передаються в публічний доступ).
-3. Підніміть інфраструктуру:
-```bash
-docker compose up -d
+```mermaid
+erDiagram
+    leads_pipeline ||--o{ Ticket_messages : generates
+    leads_pipeline {
+        uuid id
+        string contact_id
+        string client_status "lead / onboarding / active"
+        jsonb contract_data
+        text ai_pain_point
+    }
+    support_tickets ||--o{ Ticket_messages : contains
+    support_tickets {
+        string ticket_id
+        string status
+        string category "BUG / ESCALATION / CR"
+    }
+    Client_credentials {
+        string contact_id
+        jsonb credentials
+    }

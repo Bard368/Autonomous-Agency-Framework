@@ -1,0 +1,46 @@
+openapi: 3.0.0
+info:
+  title: Enterprise Calendar Sync
+  version: 1.0.0
+  description: Инструмент для проверки занятости и свободных слотов в расписании сотрудника (Google Calendar). Возвращает точную инструкцию по доступному времени.
+servers:
+  - url: https://n8n.akulov.lol
+paths:
+  /webhook/check-calendar:
+    post:
+      summary: Проверить свободные слоты в календаре
+      operationId: checkCalendar
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                contact_id:
+                  type: string
+                  description: "СТРОГО скопируй значение из твоей системной переменной {{contact_id}}. КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО искать email в тексте диалога или использовать jikoyibo@gmail.com."
+                employee_email:
+                  type: string
+                  description: "ОБЯЗАТЕЛЬНО: Передай сюда строго andcoestate@gmail.com"
+                target_date:
+                  type: string
+                  description: "Конкретная дата для проверки в формате YYYY-MM-DD (например, 2026-04-10)."
+                start_date:
+                  type: string
+                  description: "Начало периода в формате YYYY-MM-DD (например, 2026-04-10)."
+                end_date:
+                  type: string
+                  description: "Конец периода в формате YYYY-MM-DD (например, 2026-04-15)."
+      responses:
+        '200':
+          description: Текстовая инструкция с расписанием для ИИ
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  calendar_data:
+                    type: string
